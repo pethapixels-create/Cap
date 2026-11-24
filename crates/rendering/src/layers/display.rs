@@ -966,6 +966,14 @@ impl DisplayLayer {
             }
         }
 
+        if crate::probe_switch("CAP_PROBE_LOG") {
+            eprintln!(
+                "PROBE display t={current_recording_time} format={format:?} skipped={skipped} uploaded={frame_uploaded} current={} pending_copy={} cpu={}",
+                self.current_texture,
+                self.pending_copy.is_some(),
+                self.prefer_cpu_conversion
+            );
+        }
         uniforms.write_to_buffer(queue, &self.uniforms_buffer);
         (skipped && self.has_valid_frame) || frame_uploaded
     }

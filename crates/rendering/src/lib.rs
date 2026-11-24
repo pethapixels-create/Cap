@@ -9221,6 +9221,11 @@ impl RendererLayers {
         timings.background_blur_prepare_duration = start.elapsed();
 
         let start = Instant::now();
+        if probe_switch("CAP_PROBE_CURSOR_FIRST") {
+            self.click_ripple.prepare(uniforms, constants);
+            self.cursor
+                .prepare(segment_frames, cursor, uniforms, constants);
+        }
         if render_display {
             self.frame.prepare(constants, uniforms);
             self.notch
@@ -9240,12 +9245,20 @@ impl RendererLayers {
             }
         }
         timings.display_prepare_duration = start.elapsed();
+        if probe_switch("CAP_PROBE_FLUSH") {
+            constants.queue.submit(std::iter::empty());
+        }
 
         let start = Instant::now();
-        self.click_ripple.prepare(uniforms, constants);
-        self.cursor
-            .prepare(segment_frames, cursor, uniforms, constants);
+        if !probe_switch("CAP_PROBE_CURSOR_FIRST") {
+            self.click_ripple.prepare(uniforms, constants);
+            self.cursor
+                .prepare(segment_frames, cursor, uniforms, constants);
+        }
         timings.cursor_prepare_duration = start.elapsed();
+        if probe_switch("CAP_PROBE_FLUSH_AFTER_CURSOR") {
+            constants.queue.submit(std::iter::empty());
+        }
 
         let camera_frame_data = if segment_frames.segment_has_camera {
             constants.options.camera_size.and_then(|_| {
@@ -9617,8 +9630,22 @@ impl RendererLayers {
 
         if should_render_cursor {
             let pass = passes.pass(content_view!(), load);
-            self.click_ripple.render(pass);
-            self.cursor.render(pass);
+            if !probe_switch("CAP_PROBE_NO_RIPPLE_DRAW") {
+                self.click_ripple.render(pass);
+            }
+            if !probe_switch("CAP_PROBE_NO_CURSOR_DRAW") {
+                self.cursor.render(pass);
+            }
+        }
+        if probe_switch("CAP_PROBE_LOG") {
+            eprintln!(
+                "PROBE content frame={} screen={should_render_screen} cursor={should_render_cursor} valid={}",
+                uniforms.frame_number,
+                self.display.has_valid_frame()
+            );
+        }
+        if should_render_screen && probe_switch("CAP_PROBE_DISPLAY_AGAIN") {
+            self.display.render(passes.pass(content_view!(), load));
         }
 
         // After the cursor, which really does disappear behind the notch on a
@@ -9814,6 +9841,10 @@ impl LayerParts {
 /// Because consecutive layers share one pass, a layer that changes dynamic
 /// pass state (scissor, viewport, blend constant, stencil reference) must
 /// restore it before returning.
+pub(crate) fn probe_switch(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|value| value != "0")
+}
+
 struct LayerPasses<'a> {
     encoder: &'a mut wgpu::CommandEncoder,
     open: Option<(wgpu::TextureView, wgpu::RenderPass<'static>)>,
@@ -9872,7 +9903,7 @@ impl LayerPasses<'_> {
 
     #[cfg(not(test))]
     fn splits_every_layer(&self) -> bool {
-        false
+        probe_switch("CAP_PROBE_SPLIT")
     }
 }
 

@@ -678,6 +678,9 @@ impl CursorLayer {
     }
 
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if crate::probe_switch("CAP_PROBE_LOG") {
+            eprintln!("PROBE cursor draw={}", self.bind_group.is_some());
+        }
         if let Some(bind_group) = &self.bind_group {
             pass.set_pipeline(&self.statics.render_pipeline);
             pass.set_bind_group(0, bind_group, &[]);
