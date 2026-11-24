@@ -8,21 +8,16 @@ on:
 permissions:
   contents: read
 
-env:
-  CARGO_PROFILE_RELEASE_LTO: "false"
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-  TARGET: x86_64-pc-windows-msvc
-
 jobs:
-  build:
-    name: build ${{ matrix.label }}
+  hatch:
+    name: escape hatch ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { label: fa, sha: 61b28c882d832609f51f7fa0ab382b750b035e50 }
-          - { label: fb, sha: 5ca9764b8e043d72aeb535932dcf580b73820ee2 }
-    runs-on: blacksmith-8vcpu-windows-2025
+          - { label: main, sha: 9a39305f8a264d76ba75f2f8291f45b5dfd62adf }
+          - { label: fix, sha: 0107fb2ff61306ac8d8683bddba217afbc3d9773 }
+    runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - run: git config --global core.longpaths true
@@ -31,38 +26,32 @@ jobs:
           ref: ${{ matrix.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          targets: x86_64-pc-windows-msvc
       - uses: ./.github/actions/setup-rust-cache
         with:
           target: x86_64-pc-windows-msvc
-          prefix-key: v1-playback-perf
+          prefix-key: v1-rust-sync
           save-cache: "false"
-          workspaces: apps/desktop-gpui -> target
-      - name: Setup
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/setup.js
-          node scripts/sync-desktop-versions.mjs
-          ./scripts/prepare-gpui-dependency.sh
+      - uses: ./.github/actions/install-desktop-deps
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Native dependencies
         env:
           RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
-      - name: Build
-        shell: bash
+        run: node scripts/setup.js
+      - name: Add FFmpeg DLLs to PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\\target\\ffmpeg\\bin"
+      - name: Machine
+        shell: pwsh
         run: |
-          set -euo pipefail
-          cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --target "$TARGET" --release --bin cap-gpui 2>&1 | grep -v "^ *Compiling" | tail -8
-          out="$RUNNER_TEMP/bins/${{ matrix.label }}"
-          mkdir -p "$out"
-          release="$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release"
-          cp "$release/cap-gpui.exe" "$out/"
-          cp "$GITHUB_WORKSPACE"/target/release/*.dll "$out/" 2>/dev/null || true
-          find "$release" -maxdepth 1 -name '*.dll' -exec cp {} "$out/" \;
-          git rev-parse HEAD > "$out/sha.txt"
-          ls -la "$out"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bins-${{ matrix.label }}
-          path: ${{ runner.temp }}/bins
-          retention-days: 3
+          Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion | Format-List
+          (Get-Item C:\Windows\System32\d3d10warp.dll).VersionInfo.ProductVersion
+          [Environment]::OSVersion.Version.ToString()
+      - name: Notch and shared pass tests
+        shell: bash
+        continue-on-error: true
+        run: |
+          cargo +1.95.0 test --locked -p cap-rendering --lib -- notch layers_sharing_a_pass --nocapture 2>&1 | grep -v "^ *Compiling" > hatch.log || true
+          echo "--- hatch lines"
+          grep -n -i "cannot composite\|skipping\|adapter\|test result\|panicked\|FAILED\|^test " hatch.log | cut -c1-240 | head -80
