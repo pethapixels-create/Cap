@@ -967,7 +967,7 @@ impl DisplayLayer {
         }
 
         if crate::probe_switch("CAP_PROBE_LOG") {
-            eprintln!(
+            tracing::warn!(
                 "PROBE display t={current_recording_time} format={format:?} skipped={skipped} uploaded={frame_uploaded} current={} pending_copy={} cpu={}",
                 self.current_texture,
                 self.pending_copy.is_some(),

@@ -452,6 +452,10 @@ impl CursorLayer {
             return;
         }
 
+        if crate::probe_switch("CAP_PROBE_CUR_EARLY") {
+            self.bind_group = None;
+            return;
+        }
         let time_s = segment_frames.recording_time;
 
         let Some(interpolated_cursor) = &uniforms.interpolated_cursor else {
@@ -526,6 +530,21 @@ impl CursorLayer {
 
         // The family a cursor id resolves to is baked into its texture, so a
         // type change has to evict every cached sprite, not just the circle.
+        if crate::probe_switch("CAP_PROBE_LOG") {
+            tracing::warn!(
+                "PROBE cursor prepare frame={} type_changed={} svg_changed={} preloaded={} cached={} id={:?}",
+                uniforms.frame_number,
+                self.prev_cursor_type.as_ref() != Some(&cursor_type),
+                self.prev_is_svg_assets_enabled != Some(uniforms.project.cursor.use_svg),
+                self.cursor_assets_preloaded,
+                self.cursors.contains_key(&interpolated_cursor.cursor_id),
+                interpolated_cursor.cursor_id
+            );
+        }
+        if crate::probe_switch("CAP_PROBE_CUR_BEFORE_TEX") {
+            self.bind_group = None;
+            return;
+        }
         if self.prev_cursor_type.as_ref() != Some(&cursor_type) {
             self.prev_cursor_type = Some(cursor_type.clone());
             self.circle_cursor = None;
@@ -649,13 +668,27 @@ impl CursorLayer {
             grain_params: cursor_grade.grain_params,
         };
 
-        constants.queue.write_buffer(
-            &self.statics.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[cursor_uniforms]),
-        );
+        if !crate::probe_switch("CAP_PROBE_CUR_NO_UBO") {
+            constants.queue.write_buffer(
+                &self.statics.uniform_buffer,
+                0,
+                bytemuck::cast_slice(&[cursor_uniforms]),
+            );
+        }
+        if crate::probe_switch("CAP_PROBE_CUR_NO_BG") {
+            self.bind_group = None;
+            return;
+        }
 
         let texture = &cursor_texture.texture;
+        if crate::probe_switch("CAP_PROBE_LOG") {
+            tracing::warn!(
+                "PROBE cursor bind group new={}",
+                self.texture_bind_group
+                    .as_ref()
+                    .is_none_or(|(cached, _)| cached != texture)
+            );
+        }
         if self
             .texture_bind_group
             .as_ref()
@@ -679,7 +712,7 @@ impl CursorLayer {
 
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
         if crate::probe_switch("CAP_PROBE_LOG") {
-            eprintln!("PROBE cursor draw={}", self.bind_group.is_some());
+            tracing::warn!("PROBE cursor draw={}", self.bind_group.is_some());
         }
         if let Some(bind_group) = &self.bind_group {
             pass.set_pipeline(&self.statics.render_pipeline);

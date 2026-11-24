@@ -9251,7 +9251,9 @@ impl RendererLayers {
 
         let start = Instant::now();
         if !probe_switch("CAP_PROBE_CURSOR_FIRST") {
-            self.click_ripple.prepare(uniforms, constants);
+            if !probe_switch("CAP_PROBE_RIPPLE_SKIP") {
+                self.click_ripple.prepare(uniforms, constants);
+            }
             self.cursor
                 .prepare(segment_frames, cursor, uniforms, constants);
         }
@@ -9638,7 +9640,7 @@ impl RendererLayers {
             }
         }
         if probe_switch("CAP_PROBE_LOG") {
-            eprintln!(
+            tracing::warn!(
                 "PROBE content frame={} screen={should_render_screen} cursor={should_render_cursor} valid={}",
                 uniforms.frame_number,
                 self.display.has_valid_frame()
