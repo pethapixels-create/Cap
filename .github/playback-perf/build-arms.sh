@@ -16,7 +16,7 @@ for arm in $ARMS; do
   ref="${arm#*=}"
   if [[ "$ref" != "HEAD" ]]; then
     git cat-file -e "$ref^{commit}" 2>/dev/null || git fetch -q origin "$ref"
-    git restore --source "$ref" --staged --worktree -- apps crates Cargo.toml Cargo.lock
+    git restore --source "$ref" --staged --worktree -- apps crates vendor Cargo.toml Cargo.lock
     echo "arm $label = $(git rev-parse --short "$ref"): $(git diff --cached --shortstat HEAD -- apps crates)"
   fi
   cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked "$@" --release --bin cap-gpui 2>&1 |

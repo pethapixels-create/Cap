@@ -12,8 +12,8 @@ permissions:
 # benched interleaved. An empty list skips that platform.
 env:
   ARMS_MAC: ""
-  ARMS_LINUX: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=c67da6d8bf5ac17091ae73a2408135075b204dbc"
-  ARMS_WIN: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=c67da6d8bf5ac17091ae73a2408135075b204dbc"
+  ARMS_LINUX: ""
+  ARMS_WIN: "base=9a39305f8a264d76ba75f2f8291f45b5dfd62adf head=0107fb2ff61306ac8d8683bddba217afbc3d9773"
   ROUNDS: "5"
   KINDS: "play,edit"
   CARGO_PROFILE_RELEASE_LTO: "false"
