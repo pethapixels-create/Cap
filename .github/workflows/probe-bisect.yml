@@ -1,0 +1,73 @@
+name: Probe bisect
+
+on:
+  push:
+    branches:
+      - "probe/blank-preview-bisect*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  build:
+    name: build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: c09, sha: 7fee58dedf321bf2874262a4c110d5ea95ba22c6 }
+          - { label: c18, sha: 21fd8425f606e9cd8c4370a889a2ffc6c8957b8f }
+          - { label: c27, sha: 05f1377eb675337a4e4341c6ddc3289f98fbc2c1 }
+          - { label: c36, sha: 1aeefa9d2d86bc95e54823dfbde3f8e0a91c89de }
+          - { label: c45, sha: e6abedc06e837c515b8ba3df458671c87a8d407e }
+          - { label: c54, sha: 887cfee0606c08380e6cc3dd9d70f8e423095cdb }
+          - { label: c63, sha: 5c342a0fb8277a99b589f35c9e40d4308fe0e157 }
+    runs-on: blacksmith-8vcpu-windows-2025
+    timeout-minutes: 120
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-pc-windows-msvc
+          prefix-key: v1-playback-perf
+          save-cache: "false"
+          workspaces: apps/desktop-gpui -> target
+      - name: Setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/setup.js
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+        env:
+          RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --target "$TARGET" --release --bin cap-gpui 2>&1 | grep -v "^ *Compiling" | tail -8
+          out="$RUNNER_TEMP/bins/${{ matrix.label }}"
+          mkdir -p "$out"
+          release="$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release"
+          cp "$release/cap-gpui.exe" "$out/"
+          cp "$GITHUB_WORKSPACE"/target/release/*.dll "$out/" 2>/dev/null || true
+          find "$release" -maxdepth 1 -name '*.dll' -exec cp {} "$out/" \;
+          git rev-parse HEAD > "$out/sha.txt"
+          ls -la "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bins-${{ matrix.label }}
+          path: ${{ runner.temp }}/bins
+          retention-days: 3
