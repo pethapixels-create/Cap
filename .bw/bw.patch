@@ -1,0 +1,609 @@
+diff --git a/apps/desktop-gpui/calendar/src/google.rs b/apps/desktop-gpui/calendar/src/google.rs
+index 3644fcdda8..7dd031207d 100644
+--- a/apps/desktop-gpui/calendar/src/google.rs
++++ b/apps/desktop-gpui/calendar/src/google.rs
+@@ -241,7 +241,7 @@ fn map_event(
+         None,
+     );
+     let self_response = derive_self_response(organizer.as_ref(), &attendees, Response::Unknown);
+-    Some(CalendarEvent {
++    let event = CalendarEvent {
+         id,
+         series_id: non_empty(e.recurring_event_id.as_deref()),
+         calendar_id: calendar_id.to_string(),
+@@ -259,7 +259,8 @@ fn map_event(
+         status,
+         web_url: non_empty(e.html_link.as_deref()),
+         free: e.transparency.as_deref() == Some("transparent"),
+-    })
++    };
++    Some(event.bounded())
+ }
+ 
+ pub(crate) fn array_field<'a>(value: &'a Value, name: &str) -> Result<&'a [Value], Error> {
+diff --git a/apps/desktop-gpui/calendar/src/graph.rs b/apps/desktop-gpui/calendar/src/graph.rs
+index d299a2ea7e..2b5bef9c14 100644
+--- a/apps/desktop-gpui/calendar/src/graph.rs
++++ b/apps/desktop-gpui/calendar/src/graph.rs
+@@ -321,7 +321,7 @@ fn map_event(e: MEvent, calendar_id: &str, opts: &GraphOptions) -> Option<Calend
+         .and_then(|d| non_empty(Some(&d)))
+         .or_else(|| non_empty(e.body_preview.as_deref()));
+ 
+-    Some(CalendarEvent {
++    let event = CalendarEvent {
+         id,
+         series_id: non_empty(e.series_master_id.as_deref()),
+         calendar_id: calendar_id.to_string(),
+@@ -339,7 +339,8 @@ fn map_event(e: MEvent, calendar_id: &str, opts: &GraphOptions) -> Option<Calend
+         status,
+         web_url: non_empty(e.web_link.as_deref()),
+         free: e.show_as.as_deref() == Some("free"),
+-    })
++    };
++    Some(event.bounded())
+ }
+ 
+ fn next_link(value: &Value) -> Option<String> {
+diff --git a/apps/desktop-gpui/calendar/src/ics/expand.rs b/apps/desktop-gpui/calendar/src/ics/expand.rs
+index e153b7cfb1..b32de0d0e2 100644
+--- a/apps/desktop-gpui/calendar/src/ics/expand.rs
++++ b/apps/desktop-gpui/calendar/src/ics/expand.rs
+@@ -11,6 +11,10 @@ use crate::model::{
+ };
+ use crate::text::html_to_text;
+ 
++/// Most memory the events of one feed may hold once expanded. One series with
++/// huge fields can otherwise repeat them on up to a thousand occurrences.
++const EXPANDED_BYTES: usize = 64 * 1024 * 1024;
++
+ pub fn expand(
+     cal: &ParsedCalendar,
+     window: Range<DateTime<Utc>>,
+@@ -39,6 +43,7 @@ pub fn expand(
+         |start: DateTime<Utc>, end: DateTime<Utc>| start < window.end && end > window.start;
+ 
+     let mut out: Vec<CalendarEvent> = Vec::new();
++    let mut memory_left = EXPANDED_BYTES;
+     for master in masters {
+         let room = opts.max_events.saturating_sub(out.len());
+         if room == 0 {
+@@ -60,11 +65,17 @@ pub fn expand(
+         let skip = |wall: NaiveDateTime, start: DateTime<Utc>| {
+             replaced.contains(&start.timestamp()) || excluded.contains(wall, start)
+         };
+-        let cap = opts.max_instances_per_series.min(room);
++        let template = builder.template(master);
++        let weight = template.approx_bytes();
++        let cap = opts
++            .max_instances_per_series
++            .min(room)
++            .min(memory_left / weight);
+         for (wall, start) in occurrences(master, &window, cap, &skip, &mut budget) {
+             let end = master.end_for(wall, start);
+             let original = recurring.then_some(start);
+-            out.push(builder.build(master, start, end, original));
++            out.push(builder.occurrence(&template, master, start, end, original));
++            memory_left -= weight;
+         }
+     }
+     let cancelled_series: HashSet<&str> = cal
+@@ -87,7 +98,13 @@ pub fn expand(
+             let start = event.start_utc();
+             let end = event.end_for(event.start_wall, start);
+             if overlaps(start, end) {
+-                out.push(builder.build(event, start, end, event.recurrence_id));
++                let template = builder.template(event);
++                let weight = template.approx_bytes();
++                if weight > memory_left {
++                    continue;
++                }
++                memory_left -= weight;
++                out.push(builder.occurrence(&template, event, start, end, event.recurrence_id));
+             }
+         }
+     }
+@@ -208,23 +225,17 @@ impl Builder<'_> {
+         }
+     }
+ 
+-    fn build(
+-        &self,
+-        raw: &RawEvent,
+-        start: DateTime<Utc>,
+-        end: DateTime<Utc>,
+-        original: Option<DateTime<Utc>>,
+-    ) -> CalendarEvent {
++    /// Everything about `raw` that every occurrence shares, held to the
++    /// event limits, with the series uid as its id. Built once per series.
++    fn template(&self, raw: &RawEvent) -> CalendarEvent {
+         let organizer = raw.organizer.as_ref().map(|o| self.person(o));
+         let mut attendees: Vec<Person> = Vec::with_capacity(raw.attendees.len());
++        let mut emails: HashSet<String> = HashSet::with_capacity(raw.attendees.len());
+         for person in raw.attendees.iter().map(|a| self.person(a)) {
+-            let duplicate = person.email.as_deref().is_some_and(|email| {
+-                attendees.iter().any(|p| {
+-                    p.email
+-                        .as_deref()
+-                        .is_some_and(|e| e.eq_ignore_ascii_case(email))
+-                })
+-            });
++            let duplicate = person
++                .email
++                .as_deref()
++                .is_some_and(|email| !emails.insert(email.to_ascii_lowercase()));
+             if !duplicate {
+                 attendees.push(person);
+             }
+@@ -244,18 +255,14 @@ impl Builder<'_> {
+                 .map(html_to_text)
+                 .filter(|d| !d.trim().is_empty())
+         });
+-        let id = match original {
+-            Some(original) => format!("{}_{}", raw.uid, occurrence_key(original, raw.all_day)),
+-            None => raw.uid.clone(),
+-        };
+         CalendarEvent {
+-            id,
+-            series_id: original.map(|_| raw.uid.clone()),
++            id: raw.uid.clone(),
++            series_id: None,
+             calendar_id: self.calendar_id.to_string(),
+             source: SourceKind::Ics,
+             title: raw.title.clone(),
+-            start,
+-            end,
++            start: DateTime::<Utc>::MIN_UTC,
++            end: DateTime::<Utc>::MIN_UTC,
+             all_day: raw.all_day,
+             location: raw.location.clone(),
+             description,
+@@ -270,5 +277,29 @@ impl Builder<'_> {
+                 .filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+             free: raw.free,
+         }
++        .bounded()
++    }
++
++    fn occurrence(
++        &self,
++        template: &CalendarEvent,
++        raw: &RawEvent,
++        start: DateTime<Utc>,
++        end: DateTime<Utc>,
++        original: Option<DateTime<Utc>>,
++    ) -> CalendarEvent {
++        // The template's id is the series uid, already held to the id limit.
++        let uid = &template.id;
++        let id = match original {
++            Some(original) => format!("{uid}_{}", occurrence_key(original, raw.all_day)),
++            None => uid.clone(),
++        };
++        CalendarEvent {
++            id,
++            series_id: original.map(|_| uid.clone()),
++            start,
++            end,
++            ..template.clone()
++        }
+     }
+ }
+diff --git a/apps/desktop-gpui/calendar/src/lib.rs b/apps/desktop-gpui/calendar/src/lib.rs
+index a2be1214bb..85b477853f 100644
+--- a/apps/desktop-gpui/calendar/src/lib.rs
++++ b/apps/desktop-gpui/calendar/src/lib.rs
+@@ -19,4 +19,7 @@ pub use link::{
+     ConferenceEntry, ConferenceKind, MeetingLink, Provider, classify_url, event_meeting_link,
+     find_meeting_link,
+ };
+-pub use model::{CalendarEvent, CalendarInfo, EventStatus, Page, Person, Response, SourceKind};
++pub use model::{
++    CalendarEvent, CalendarInfo, EventStatus, MAX_ATTENDEES, MAX_TEXT_BYTES, MAX_TITLE_BYTES, Page,
++    Person, Response, SourceKind,
++};
+diff --git a/apps/desktop-gpui/calendar/src/model.rs b/apps/desktop-gpui/calendar/src/model.rs
+index 05ed435137..b83b975da5 100644
+--- a/apps/desktop-gpui/calendar/src/model.rs
++++ b/apps/desktop-gpui/calendar/src/model.rs
+@@ -43,6 +43,14 @@ pub struct Person {
+ }
+ 
+ impl Person {
++    fn bound(&mut self) {
++        if let Some(name) = self.name.as_mut() {
++            clean_line(name);
++        }
++        clip_opt(&mut self.name, MAX_PERSON_BYTES);
++        clip_opt(&mut self.email, MAX_PERSON_BYTES);
++    }
++
+     pub fn display_name(&self) -> Option<&str> {
+         self.name
+             .as_deref()
+@@ -73,7 +81,69 @@ pub struct CalendarEvent {
+     pub free: bool,
+ }
+ 
++/// Most a title keeps, in bytes.
++pub const MAX_TITLE_BYTES: usize = 1024;
++/// Most a place or description keeps, in bytes. Descriptions are only read for
++/// a meeting link, which is found before they are cut.
++pub const MAX_TEXT_BYTES: usize = 4096;
++/// Most a person's name or email keeps, in bytes.
++pub const MAX_PERSON_BYTES: usize = 320;
++/// Most people kept on one event, besides the user.
++pub const MAX_ATTENDEES: usize = 1000;
++/// Longer event ids are replaced by a hash of themselves.
++pub const MAX_ID_BYTES: usize = 512;
++
+ impl CalendarEvent {
++    /// The event with every field held to the limits above, and its title,
++    /// place and names on one line without control or direction-override
++    /// characters. A feed can repeat one huge field on every occurrence of a
++    /// series.
++    pub fn bounded(mut self) -> Self {
++        clean_line(&mut self.title);
++        clip(&mut self.title, MAX_TITLE_BYTES);
++        if let Some(location) = self.location.as_mut() {
++            clean_line(location);
++        }
++        clip_opt(&mut self.location, MAX_TEXT_BYTES);
++        clip_opt(&mut self.description, MAX_TEXT_BYTES);
++        clip_opt(&mut self.web_url, MAX_TEXT_BYTES);
++        if let Some(organizer) = self.organizer.as_mut() {
++            organizer.bound();
++        }
++        if self.attendees.len() > MAX_ATTENDEES {
++            let mut others = 0;
++            self.attendees.retain(|person| {
++                others += usize::from(!person.is_self);
++                person.is_self || others <= MAX_ATTENDEES
++            });
++        }
++        for person in &mut self.attendees {
++            person.bound();
++        }
++        self.id = bound_id(std::mem::take(&mut self.id));
++        self.series_id = self.series_id.take().map(bound_id);
++        self
++    }
++
++    /// Roughly how much memory the event holds, in bytes.
++    pub fn approx_bytes(&self) -> usize {
++        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
++        let person = |p: &Person| text(&p.name) + text(&p.email) + 48;
++        256 + self.id.len()
++            + text(&self.series_id)
++            + self.calendar_id.len()
++            + self.title.len()
++            + text(&self.location)
++            + text(&self.description)
++            + text(&self.web_url)
++            + self
++                .link
++                .as_ref()
++                .map_or(0, |l| l.url.len() + text(&l.meeting_id))
++            + self.organizer.as_ref().map_or(0, person)
++            + self.attendees.iter().map(person).sum::<usize>()
++    }
++
+     pub fn is_cancelled(&self) -> bool {
+         self.status == EventStatus::Cancelled
+     }
+@@ -182,3 +252,46 @@ pub(crate) fn derive_self_response(
+         .find(|p| p.is_self)
+         .map_or(Response::Unknown, |p| p.response)
+ }
++
++/// Line breaks and tabs become spaces; other control characters and the
++/// left-to-right and right-to-left override marks, which show as boxes or
++/// reverse what follows them, are dropped.
++fn clean_line(text: &mut String) {
++    let unwanted = |c: char| c.is_control() || matches!(c, '\u{202D}' | '\u{202E}');
++    if text.chars().any(unwanted) {
++        *text = text
++            .chars()
++            .filter_map(|c| match c {
++                '\t' | '\n' | '\r' => Some(' '),
++                c if unwanted(c) => None,
++                c => Some(c),
++            })
++            .collect();
++    }
++}
++
++fn clip(text: &mut String, max: usize) {
++    if text.len() > max {
++        let mut end = max;
++        while !text.is_char_boundary(end) {
++            end -= 1;
++        }
++        text.truncate(end);
++    }
++}
++
++fn clip_opt(text: &mut Option<String>, max: usize) {
++    if let Some(text) = text.as_mut() {
++        clip(text, max);
++    }
++}
++
++fn bound_id(id: String) -> String {
++    use sha2::{Digest, Sha256};
++    if id.len() <= MAX_ID_BYTES {
++        return id;
++    }
++    let digest = Sha256::digest(id.as_bytes());
++    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
++    format!("sha256-{hex}")
++}
+diff --git a/apps/desktop-gpui/calendar/src/system.rs b/apps/desktop-gpui/calendar/src/system.rs
+index 0008ee17e6..47d62d233e 100644
+--- a/apps/desktop-gpui/calendar/src/system.rs
++++ b/apps/desktop-gpui/calendar/src/system.rs
+@@ -100,4 +100,5 @@ pub fn from_system_event(event: &SystemEvent, local_zone: Tz) -> CalendarEvent {
+         web_url: None,
+         free: event.free,
+     }
++    .bounded()
+ }
+diff --git a/apps/desktop-gpui/calendar/tests/hostile.rs b/apps/desktop-gpui/calendar/tests/hostile.rs
+index 6482b0ac21..60fcc9605d 100644
+--- a/apps/desktop-gpui/calendar/tests/hostile.rs
++++ b/apps/desktop-gpui/calendar/tests/hostile.rs
+@@ -225,3 +225,160 @@ fn megabytes_of_mixed_hostile_input_finish_quickly() {
+         Duration::from_millis(3_000),
+     );
+ }
++
++fn expand_all(text: &str) -> (Vec<cap_calendar::CalendarEvent>, Duration, usize) {
++    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
++    let opts = ParseOptions {
++        default_zone: Tz::UTC,
++        ..ParseOptions::default()
++    };
++    let baseline = LIVE.load(Ordering::Relaxed);
++    PEAK.store(baseline, Ordering::Relaxed);
++    let started = Instant::now();
++    let cal = parse_calendar(text, &opts);
++    let events = expand(
++        &cal,
++        utc("2026-01-01T00:00:00Z")..utc("2026-03-01T00:00:00Z"),
++        &[],
++    );
++    let elapsed = started.elapsed();
++    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
++    (events, elapsed, peak)
++}
++
++#[test]
++fn a_huge_description_is_not_copied_to_every_occurrence() {
++    let filler = "agenda ".repeat(MB / 7);
++    let text = feed(1, |i| {
++        vevent(
++            i,
++            &format!(
++                "DTSTART:20260101T000000Z\r\nRRULE:FREQ=HOURLY\r\nDESCRIPTION:{filler}https://zoom.us/j/123456789\r\n"
++            ),
++        )
++    });
++    let (events, elapsed, peak) = expand_all(&text);
++    eprintln!(
++        "1 MB description hourly: {} events, {elapsed:?}, peak {} MB",
++        events.len(),
++        peak / MB
++    );
++    assert_eq!(events.len(), 1_000);
++    assert!(peak < 32 * MB, "peak {} MB", peak / MB);
++    assert!(elapsed < Duration::from_millis(1_500), "took {elapsed:?}");
++    for event in &events {
++        let link = event
++            .link
++            .as_ref()
++            .expect("the link at the end of the description");
++        assert_eq!(link.url, "https://zoom.us/j/123456789");
++        assert!(event.description.as_ref().unwrap().len() <= cap_calendar::MAX_TEXT_BYTES);
++    }
++}
++
++#[test]
++fn thousands_of_attendees_on_a_series_are_cheap() {
++    let people: String = (0..3_000)
++        .map(|n| format!("ATTENDEE;CN=Person {n}:mailto:p{n}@example.com\r\n"))
++        .collect();
++    let text = feed(1, |i| {
++        vevent(
++            i,
++            &format!("DTSTART:20260101T000000Z\r\nRRULE:FREQ=HOURLY\r\n{people}"),
++        )
++    });
++    let (events, elapsed, peak) = expand_all(&text);
++    eprintln!(
++        "3000 attendees hourly: {} events, {elapsed:?}, peak {} MB",
++        events.len(),
++        peak / MB
++    );
++    assert!(!events.is_empty());
++    assert!(peak < 96 * MB, "peak {} MB", peak / MB);
++    assert!(elapsed < Duration::from_millis(1_500), "took {elapsed:?}");
++    assert!(
++        events
++            .iter()
++            .all(|e| e.attendees.len() == cap_calendar::MAX_ATTENDEES)
++    );
++}
++
++#[test]
++fn a_huge_uid_gives_short_stable_ids() {
++    let uid = "u".repeat(MB);
++    let text = format!(
++        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nSUMMARY:Standup\r\nDTSTART:20260101T090000Z\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
++    );
++    let (first, elapsed, peak) = expand_all(&text);
++    let (second, _, _) = expand_all(&text);
++    eprintln!(
++        "1 MB uid daily: {} events, {elapsed:?}, peak {} MB",
++        first.len(),
++        peak / MB
++    );
++    assert_eq!(first.len(), 59);
++    assert!(peak < 16 * MB, "peak {} MB", peak / MB);
++    let ids: Vec<&str> = first.iter().map(|e| e.id.as_str()).collect();
++    assert_eq!(
++        ids,
++        second.iter().map(|e| e.id.as_str()).collect::<Vec<_>>()
++    );
++    assert!(ids.iter().all(|id| id.len() < 128));
++    let unique: std::collections::HashSet<&&str> = ids.iter().collect();
++    assert_eq!(unique.len(), ids.len());
++    assert!(first.iter().all(|e| e.series_id == first[0].series_id));
++}
++
++#[test]
++fn bounding_keeps_the_user_among_many_people() {
++    use cap_calendar::{CalendarEvent, MAX_ATTENDEES, MAX_TITLE_BYTES, Person, Response};
++    let mut attendees: Vec<Person> = (0..MAX_ATTENDEES + 500)
++        .map(|n| Person {
++            name: Some(format!("Person {n}")),
++            email: Some(format!("p{n}@example.com")),
++            ..Person::default()
++        })
++        .collect();
++    attendees.push(Person {
++        email: Some("me@example.com".into()),
++        is_self: true,
++        response: Response::Declined,
++        ..Person::default()
++    });
++    let event = CalendarEvent {
++        id: "e1".into(),
++        title: "é".repeat(MAX_TITLE_BYTES),
++        attendees,
++        ..CalendarEvent::default()
++    }
++    .bounded();
++    assert_eq!(event.id, "e1");
++    assert!(event.title.len() <= MAX_TITLE_BYTES);
++    assert!(event.title.chars().all(|c| c == 'é'));
++    assert_eq!(event.attendees.len(), MAX_ATTENDEES + 1);
++    assert!(
++        event
++            .attendees
++            .iter()
++            .any(|p| p.is_self && p.response == Response::Declined)
++    );
++}
++
++#[test]
++fn titles_and_names_lose_control_and_override_characters() {
++    let text = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:t1\r\nDTSTART:20260105T090000Z\r\n\
++        SUMMARY:\u{202e}exe.txt\u{202c} Q3\u{7}\u{1b}[31m review\\nnext \u{200b}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} مرحبا\r\n\
++        LOCATION:Room\u{7} 4\r\n\
++        ATTENDEE;CN=\"\u{202e}LAHS\u{202c} Mallory\":mailto:m@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
++    let (events, _, _) = expand_all(text);
++    let event = &events[0];
++    assert_eq!(
++        event.title,
++        "exe.txt\u{202c} Q3[31m review next \u{200b}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} مرحبا"
++    );
++    assert_eq!(event.location.as_deref(), Some("Room 4"));
++    assert_eq!(
++        event.attendees[0].name.as_deref(),
++        Some("LAHS\u{202c} Mallory")
++    );
++}
+diff --git a/apps/desktop-gpui/src/meetings/generate.rs b/apps/desktop-gpui/src/meetings/generate.rs
+index 4034ddca36..56fb316939 100644
+--- a/apps/desktop-gpui/src/meetings/generate.rs
++++ b/apps/desktop-gpui/src/meetings/generate.rs
+@@ -170,8 +170,8 @@ impl SseParser {
+                 .to_string()
+         };
+         match event.as_deref().unwrap_or("message") {
+-            "title" => Some(SseEvent::Title(text("title"))),
+-            "delta" => Some(SseEvent::Delta(text("text"))),
++            "title" => Some(SseEvent::Title(shown_text(&text("title"), false))),
++            "delta" => Some(SseEvent::Delta(shown_text(&text("text"), true))),
+             "done" => Some(SseEvent::Done),
+             "error" => Some(SseEvent::Error(text("error"))),
+             _ => None,
+@@ -179,6 +179,20 @@ impl SseParser {
+     }
+ }
+ 
++/// Written text without control characters, which show as boxes, or the
++/// left-to-right and right-to-left override marks, which reverse what follows
++/// them. Line breaks and tabs are kept in notes and become spaces in a title.
++fn shown_text(text: &str, multiline: bool) -> String {
++    text.chars()
++        .filter_map(|c| match c {
++            '\n' | '\t' if multiline => Some(c),
++            '\n' | '\t' => Some(' '),
++            c if c.is_control() || matches!(c, '\u{202D}' | '\u{202E}') => None,
++            c => Some(c),
++        })
++        .collect()
++}
++
+ fn clip_chars(text: &str, max: usize) -> String {
+     if text.chars().count() <= max {
+         return text.to_string();
+diff --git a/apps/desktop-gpui/src/meetings/tests.rs b/apps/desktop-gpui/src/meetings/tests.rs
+index 2b222b7e91..c5b54576e9 100644
+--- a/apps/desktop-gpui/src/meetings/tests.rs
++++ b/apps/desktop-gpui/src/meetings/tests.rs
+@@ -319,6 +319,26 @@ fn the_sse_parser_handles_split_chunks_and_keep_alives() {
+     );
+ }
+ 
++#[test]
++fn generated_titles_and_notes_lose_control_and_override_characters() {
++    let mut parser = SseParser::default();
++    let events = parser.push(
++        "event: title\ndata: {\"title\":\"\\u202etxt.exe\\u202c Q3\\u0007\\u001b[31m review\\nnext\"}\n\n\
++         event: delta\ndata: {\"text\":\"- \\u202eexe.txt\\u202c \\u0007ok\\r\\n\\t- \\u05e9\\u05dc\\u05d5\\u05dd \\ud83d\\udc68\\u200d\\ud83d\\udc69\\n\"}\n\n"
++            .as_bytes(),
++    );
++    assert_eq!(
++        events,
++        vec![
++            SseEvent::Title("txt.exe\u{202c} Q3[31m review next".into()),
++            SseEvent::Delta(
++                "- exe.txt\u{202c} ok\n\t- \u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{1F468}\u{200D}\u{1F469}\n"
++                    .into()
++            ),
++        ]
++    );
++}
++
+ fn meeting_meta(title_is_auto: bool) -> cap_meetings::library::DocMeta {
+     let now = Utc.with_ymd_and_hms(2026, 11, 12, 9, 30, 0).unwrap();
+     let mut meta = cap_meetings::library::DocMeta::new("doc-1".into(), DocKind::Meeting, now);
+diff --git a/apps/desktop-gpui/src/updates.rs b/apps/desktop-gpui/src/updates.rs
+index 520204b9be..addda04777 100644
+--- a/apps/desktop-gpui/src/updates.rs
++++ b/apps/desktop-gpui/src/updates.rs
+@@ -220,6 +220,7 @@ pub(crate) fn work_in_flight(cx: &mut App) -> bool {
+         || crate::import::imports_in_flight(cx)
+         || crate::transcription::work_in_flight()
+         || crate::recordings_overlay::work_in_flight(cx)
++        || crate::meetings::Meetings::try_global(cx).is_some_and(|m| m.read(cx).is_recording())
+ }
+ 
+ pub(crate) fn status(cx: &App) -> UpdateStatus {
+diff --git a/apps/desktop-gpui/src/updates.rs b/apps/desktop-gpui/src/updates.rs
+index addda04777..dce58f13bb 100644
+--- a/apps/desktop-gpui/src/updates.rs
++++ b/apps/desktop-gpui/src/updates.rs
+@@ -741,6 +741,12 @@ fn start_download(release: Release, cx: &mut App) {
+ 
+ fn update_failed(message: &str, cx: &mut App) {
+     set_status(UpdateStatus::Idle, cx);
++    // The alert is modal and brings Cap forward, so it never interrupts a
++    // recording or a meeting; the next scheduled check tries again.
++    if work_in_flight(cx) {
++        tracing::warn!("update failed while Cap was busy; not interrupting: {message}");
++        return;
++    }
+     let message = tr::dialog::update::failed(message);
+     cx.spawn(async move |_| {
+         crate::platform::activate_app();

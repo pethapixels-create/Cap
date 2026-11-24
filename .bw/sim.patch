@@ -1,0 +1,66 @@
+diff --git a/apps/desktop-gpui/src/updates.rs b/apps/desktop-gpui/src/updates.rs
+index 520204b9be..7b4b6baa4a 100644
+--- a/apps/desktop-gpui/src/updates.rs
++++ b/apps/desktop-gpui/src/updates.rs
+@@ -373,7 +373,11 @@ fn simulate_update(version: Version, cx: &mut App) {
+         return;
+     }
+     cx.spawn(async move |cx| {
+-        cx.background_executor().timer(Duration::from_secs(3)).await;
++        let delay = std::env::var("BW_UPDATE_DELAY_SECS")
++            .ok()
++            .and_then(|v| v.parse().ok())
++            .unwrap_or(3);
++        cx.background_executor().timer(Duration::from_secs(delay)).await;
+         cx.update(|cx| simulate_download(version, cx));
+     })
+     .detach();
+@@ -409,7 +413,19 @@ fn simulate_download(version: Version, cx: &mut App) {
+         }
+         cx.update(|cx| {
+             tracing::info!(%version, "CAP_GPUI_UPDATE_SIMULATION_VERSION: ready");
++            cx.global_mut::<UpdateScheduler>().staged = Some(StagedUpdate {
++                kind: ArtifactKind::AppImage,
++                package: std::env::temp_dir().join("bw-fake-update.AppImage"),
++            });
+             set_status(UpdateStatus::Ready { version }, cx);
++            tracing::info!("BW: asking to restart like a real download");
++            if std::env::var_os("BW_FAIL_DOWNLOAD").is_some() {
++                tracing::info!("BW: the download failed like a real one");
++                cx.global_mut::<UpdateScheduler>().staged = None;
++                update_failed("simulated network failure", cx);
++                return;
++            }
++            prompt_restart(cx);
+         });
+     })
+     .detach();
+@@ -435,6 +451,17 @@ pub(crate) fn schedule_startup_check(cx: &mut App) {
+     #[cfg(debug_assertions)]
+     if let Some(version) = harness_update_version() {
+         simulate_update(version, cx);
++        if let Some(at) = std::env::var("BW_EXPLICIT_RESTART_AT")
++            .ok()
++            .and_then(|v| v.parse::<u64>().ok())
++        {
++            cx.spawn(async move |cx| {
++                cx.background_executor().timer(Duration::from_secs(at)).await;
++                tracing::info!("BW: the user chose Restart to update");
++                cx.update(install_and_relaunch);
++            })
++            .detach();
++        }
+         return;
+     }
+     #[cfg(not(debug_assertions))]
+@@ -905,6 +932,10 @@ fn relaunch_into(version: &Version, executable: &std::path::Path, cx: &mut App)
+ }
+ 
+ fn apply(package: &std::path::Path, kind: ArtifactKind) -> Result<Option<PathBuf>, String> {
++    if std::env::var_os("BW_FAKE_APPLY").is_some() {
++        tracing::info!("BW: fake update applied");
++        return std::env::current_exe().map(Some).map_err(|e| e.to_string());
++    }
+     installer::check_artifact_kind(package, kind)?;
+     apply_package(package, kind)
+ }
