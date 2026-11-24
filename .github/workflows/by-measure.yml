@@ -1,0 +1,177 @@
+name: Scratch BY lifecycle measurements
+# Temporary measurement branch (deleted after use): runs .by/life.py (launch, idle, Library and
+# transcript benches, a scripted meeting) on GitHub-hosted machines with the binaries of the
+# by-build run named in .by/build-run.txt. Nothing here ships.
+
+on:
+  push:
+    branches: [ci/by-measure]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: by-measure
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: ${{ matrix.box }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - box: linux-mid
+            runner: ubuntu-24.04
+            os: linux
+          - box: windows-mid
+            runner: windows-2025
+            os: windows
+          - box: mac-arm-8gb
+            runner: macos-15
+            os: mac-arm
+          - box: mac-intel
+            runner: macos-15-intel
+            os: mac-x64
+    env:
+      W: ${{ github.workspace }}/../by
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Plan
+        id: plan
+        shell: bash
+        run: |
+          echo "run=$(grep -E "^${{ matrix.os }} " .by/build-run.txt | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          grep -E "^${{ matrix.box }} " .by/plan.txt | head -1 | cut -d' ' -f2- > "$RUNNER_TEMP/steps.txt" || true
+          cat "$RUNNER_TEMP/steps.txt"
+          if [ -s "$RUNNER_TEMP/steps.txt" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/download-artifact@v4
+        if: steps.plan.outputs.go == '1'
+        with:
+          pattern: by-${{ matrix.os }}-*
+          path: ${{ runner.temp }}/dl
+          run-id: ${{ steps.plan.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Unpack
+        if: steps.plan.outputs.go == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$W"
+          for v in ship-pre ship-head hx-head; do
+            mkdir -p "$W/$v"
+            tar xzf "$RUNNER_TEMP/dl/by-${{ matrix.os }}-$v/by-${{ matrix.os }}-$v.tgz" -C "$W/$v"
+            echo "$v $(cat "$W/$v/commit.txt")"
+          done
+          cp .by/life.py .by/winwait.swift scripts/ci/meetings/stub_server.py "$W/"
+      - if: steps.plan.outputs.go == '1' && runner.os == 'Linux'
+        uses: ./.github/actions/install-desktop-deps
+      - name: Tools (Linux)
+        if: steps.plan.outputs.go == '1' && (runner.os == 'Linux')
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends xvfb x11-utils pulseaudio pulseaudio-utils \
+            ffmpeg mesa-vulkan-drivers libvulkan1 python3-psutil > /dev/null
+          nproc; free -m
+      - name: Tools (macOS)
+        if: steps.plan.outputs.go == '1' && (runner.os == 'macOS')
+        run: |
+          command -v ffmpeg > /dev/null || brew install ffmpeg > "$RUNNER_TEMP/brew.log" 2>&1
+          python3 -m pip install --quiet --break-system-packages psutil || python3 -m pip install --quiet psutil
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; sw_vers
+          swiftc -O "$W/winwait.swift" -o "$W/winwait"
+          # Computer audio + microphone for whoever TCC holds responsible (BF compat recipe).
+          U="$HOME/Library/Application Support/com.apple.TCC/TCC.db"; S="/Library/Application Support/com.apple.TCC/TCC.db"
+          PY=$(python3 -c 'import os,sys;print(os.path.realpath(sys.executable))')
+          for client in /usr/local/opt/runner/provisioner/provisioner /usr/local/opt/runner/runprovisioner.sh \
+            /opt/hca/hosted-compute-agent /opt/hca/start_hca.sh /bin/bash /bin/zsh /bin/sh "$PY" "$W/hx-head/bin/cap-gpui"; do
+            for service in kTCCServiceAudioCapture kTCCServiceMicrophone; do
+              row="'$service','$client',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,1687786159,NULL,NULL,'UNUSED',1687786159"
+              sqlite3 "$U" "insert or replace into access values ($row)" 2> /dev/null || true
+              sudo sqlite3 "$S" "insert or replace into access values ($row)" 2> /dev/null || true
+            done
+          done
+          sudo killall tccd 2> /dev/null; killall tccd 2> /dev/null; sleep 2
+      - name: Tools (Windows)
+        if: steps.plan.outputs.go == '1' && (runner.os == 'Windows')
+        shell: pwsh
+        run: |
+          scripts/ci/meetings/setup_audio.ps1
+          if (-not (Get-Command ffplay -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Out-Null }
+          $choco = if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }
+          Add-Content $env:GITHUB_PATH "$choco\bin"
+          python -m pip install --quiet psutil
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfLogicalProcessors
+          $w = (Resolve-Path "$env:W").Path
+          $zed = Join-Path (Get-Content "$w\hx-head\build-zed.txt" -Raw).Trim() "crates\gpui_windows\src"
+          New-Item -ItemType Directory -Force $zed | Out-Null
+          Copy-Item "$w\hx-head\shaders\*.hlsl" $zed
+      - name: Models
+        if: steps.plan.outputs.go == '1'
+        shell: bash
+        run: |
+          bash scripts/ci/meetings/models.sh "$W/models" > /dev/null
+          if [ "${{ matrix.os }}" = mac-x64 ]; then
+            curl -fsSL --retry 3 -o "$W/models/base.bin" https://github.com/CapSoftware/transcription-models/releases/download/whisper-v1/ggml-base.bin
+          fi
+          ls -la "$W/models"
+      - name: Measure
+        if: steps.plan.outputs.go == '1'
+        shell: bash
+        run: |
+          set +e
+          cd "$W"
+          PY=python3; [ "$RUNNER_OS" = Windows ] && PY=python
+          FIX="$GITHUB_WORKSPACE/apps/desktop-gpui/tests/fixtures/meetings"
+          if [ "$RUNNER_OS" = Linux ]; then
+            export DISPLAY=:91
+            Xvfb $DISPLAY -screen 0 1920x1080x24 -nolisten tcp > xvfb.log 2>&1 &
+            pd=$(mktemp -d)
+            pulseaudio -n --daemonize=yes --exit-idle-time=-1 \
+              -L "module-native-protocol-unix socket=$pd/native auth-anonymous=1" \
+              -L "module-null-sink sink_name=room sink_properties=device.description=Room" \
+              -L "module-null-sink sink_name=micsink sink_properties=device.description=MicFeed" \
+              -L "module-remap-source master=micsink.monitor source_name=mic source_properties=device.description=Mic"
+            export PULSE_SERVER=unix:$pd/native
+            sleep 2; pactl set-default-sink room; pactl set-default-source mic
+            export XDG_SESSION_TYPE=x11; unset WAYLAND_DISPLAY
+          fi
+          ENGINE=default; MINS=60
+          [ "${{ matrix.os }}" = mac-x64 ] && ENGINE=local
+          STEPS=$(cat "$RUNNER_TEMP/steps.txt"); [ -z "$STEPS" ] && STEPS="launch idle ui meeting"
+          for s in $STEPS; do
+            echo "::group::$s"
+            case $s in
+              launch) $PY life.py launch --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 7 ;;
+              idle) $PY life.py idle --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 2 ;;
+              ui) $PY life.py ui --out out --pkg hx-head --runs 3 ;;
+              meeting) $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins $MINS --engine $ENGINE ;;
+              smoke)
+                $PY life.py launch --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 1
+                $PY life.py idle --out out --models models --arm pre=ship-pre --arm head-notes=ship-head:notes --rounds 1 --settle 10 --secs 30
+                $PY life.py ui --out out --pkg hx-head --runs 1
+                $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins 4 --engine $ENGINE --linger 30 ;;
+              meeting10) $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins 10 --engine $ENGINE ;;
+            esac
+            echo "::endgroup::"
+          done
+          ls out
+          cat out/*.jsonl
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.go == '1' && (always())
+        with:
+          name: res-${{ matrix.box }}
+          path: |
+            ${{ env.W }}/out/*.jsonl
+            ${{ env.W }}/out/runs/*/app.log
+            ${{ env.W }}/out/runs/*/app.out
+            ${{ env.W }}/out/runs/*/summary.json
+            ${{ env.W }}/out/runs/*/samples.jsonl
+            ${{ env.W }}/out/runs/*/powermetrics.txt
+            ${{ env.W }}/out/runs/*/stub.jsonl
+          retention-days: 5
