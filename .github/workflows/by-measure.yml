@@ -5,7 +5,7 @@ name: Scratch BY lifecycle measurements
 
 on:
   push:
-    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m]
+    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m, ci/by-wprof]
 
 permissions:
   contents: read
@@ -79,6 +79,13 @@ jobs:
             A="$RUNNER_TEMP/dl/fix/by-${{ matrix.os }}-ship-fix.tgz"; D="$W/ship-fix"; mkdir -p "$D"
             if [ "$RUNNER_OS" = Windows ]; then A=$(cygpath -u "$A"); D=$(cygpath -u "$D"); fi
             tar -xzf "$A" -C "$D"; echo "ship-fix $(cat "$W/ship-fix/commit.txt")"
+          fi
+          DBGRUN=$(grep -E "^${{ matrix.os }}-dbg " .by/build-run.txt | cut -d' ' -f2 || true)
+          if [ -n "$DBGRUN" ]; then
+            gh run download "$DBGRUN" -R "$GITHUB_REPOSITORY" -n "by-${{ matrix.os }}-hx-dbg" -D "$RUNNER_TEMP/dl/dbg"
+            A="$RUNNER_TEMP/dl/dbg/by-${{ matrix.os }}-hx-dbg.tgz"; D="$W/hx-dbg"; mkdir -p "$D"
+            if [ "$RUNNER_OS" = Windows ]; then A=$(cygpath -u "$A"); D=$(cygpath -u "$D"); fi
+            tar -xzf "$A" -C "$D"
           fi
           cp .by/life.py .by/winwait.swift scripts/ci/meetings/stub_server.py "$W/"
       - if: steps.plan.outputs.go == '1' && runner.os == 'Linux'
@@ -163,6 +170,15 @@ jobs:
                 A="--arm pre=ship-pre:welcome --arm head=ship-head:welcome"
                 [ -d ship-fix ] && A="$A --arm fix=ship-fix:welcome"
                 $PY life.py idle --label welcome --out out $A --rounds 3 --settle 15 --secs 60 ;;
+              sprof)
+                curl -fsSL -o "$RUNNER_TEMP/samply.zip" https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-x86_64-pc-windows-msvc.zip
+                mkdir -p "$RUNNER_TEMP/samply" && unzip -q -o "$RUNNER_TEMP/samply.zip" -d "$RUNNER_TEMP/samply"
+                SAMPLY=$(find "$RUNNER_TEMP/samply" -name samply.exe | head -1)
+                WPT="/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit"
+                ls "$WPT/xperf.exe" || echo "no xperf"
+                export PATH="$WPT:$PATH"
+                Z=$(cat hx-dbg/build-zed.txt); mkdir -p "$Z/crates/gpui_windows/src" && cp hx-dbg/shaders/*.hlsl "$Z/crates/gpui_windows/src/" || true
+                $PY life.py sprof --out out --arm welcome=hx-dbg:welcome --secs 25 --samply "$SAMPLY" ;;
               glpanic)
                 $PY life.py glpanic --out out --pkg ship-head --rounds 12
                 $PY life.py glpanic --out out --pkg ship-head --rounds 8 --secs 30 ;;
@@ -194,6 +210,9 @@ jobs:
           path: |
             ${{ runner.temp }}/by/out/*.jsonl
             ${{ runner.temp }}/by/out/perf-*.txt
+            ${{ runner.temp }}/by/out/sprof-*
+            ${{ runner.temp }}/by/out/runs/sprof-*/logs/*
+            ${{ runner.temp }}/by/out/runs/sprof-*/samply.out
             ${{ runner.temp }}/by/out/runs/gl-*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.out

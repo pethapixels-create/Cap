@@ -504,6 +504,28 @@ def cmd_glpanic(a):
         append(out, "glpanic", row)
 
 
+def cmd_sprof(a):
+    """Windows: samply (ETW) profile of one arm's idle window, presymbolicated, then the app killed so
+    samply writes the profile. Needs the Windows Performance Toolkit on PATH."""
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    name, pkg, flags = parse_arms([a.arm])[0]
+    r = profile(out / "runs" / f"sprof-{name}", "notes" in flags, welcome="welcome" in flags)
+    env = app_env(pkg, r, {"RUST_LOG": "info"})
+    prof = (out / f"sprof-{name}.json.gz").resolve()
+    sp = subprocess.Popen([a.samply, "record", "--save-only", "--unstable-presymbolicate", "-o", str(prof), "--",
+                           str(exe(pkg))], env=env, cwd=str(r), stdout=open(r / "samply.out", "wb"),
+                          stderr=subprocess.STDOUT)
+    time.sleep(a.secs)
+    for c in psutil.Process(sp.pid).children(recursive=True):
+        if c.name().lower().startswith("cap-gpui"):
+            c.kill()
+    try:
+        sp.wait(timeout=300)
+    except subprocess.TimeoutExpired:
+        sp.kill()
+    print("sprof", name, prof.exists(), (r / "samply.out").read_text(errors="replace")[-400:], flush=True)
+
+
 def stub(port, log):
     p = subprocess.Popen([sys.executable, str(STUB), str(port), str(log)])
     for _ in range(100):
@@ -590,6 +612,11 @@ def cmd_meeting(a):
     extra = {"CAP_GPUI_AUTO_MEETING": str(secs), "CAP_GPUI_AUTO_MEETING_LINGER": str(a.linger),
              "CAP_GPUI_AUTO_MEETING_OUT": str(r / "summary.json"), "CAP_GPUI_AUTO_MEETING_MIC_SCRIPT": str(script),
              "CAP_GPUI_AUTO_MEETING_MARKS": str(r / "marks.txt"), "CAP_GPUI_DOCS_OPEN": "live", "CAP_BY_FRAMES": "1"}
+    for kv in a.env or []:
+        k, v = kv.split("=", 1)
+        extra[k] = v
+    if a.rust_log:
+        extra["RUST_LOG"] = a.rust_log
     p, t0 = spawn(a.pkg, r, extra)
     smp = Sampler(p.pid, 5.0); smp.start()
     started = None
@@ -599,7 +626,20 @@ def cmd_meeting(a):
             break
         time.sleep(0.1)
     time.sleep(3)
-    play = player(sysw)
+    play = player(sysw) if not a.no_play else None
+    if a.pause_audiod:
+        at, secs_ = (int(x) for x in a.pause_audiod.split(":"))
+        def pause():
+            time.sleep(at)
+            pid = subprocess.run(["pgrep", "-x", "coreaudiod"], capture_output=True, text=True).stdout.split()
+            if pid:
+                subprocess.run(["sudo", "-n", "kill", "-STOP", pid[0]])
+                (r / "pause.txt").write_text(f"stop {pid[0]} {time.time()}\n")
+                time.sleep(secs_)
+                subprocess.run(["sudo", "-n", "kill", "-CONT", pid[0]])
+                with open(r / "pause.txt", "a") as f:
+                    f.write(f"cont {time.time()}\n")
+        threading.Thread(target=pause, daemon=True).start()
     energy = Energy(r / "powermetrics.txt", secs + a.linger, interval=30)
     deadline = time.time() + secs + a.linger + 1800
     while time.time() < deadline and p.poll() is None and not (r / "summary.json").exists():
@@ -608,7 +648,8 @@ def cmd_meeting(a):
     smp.stop.set(); smp.join()
     e = energy.finish()
     for q in (play, st):
-        q.terminate()
+        if q:
+            q.terminate()
     kill(p)
     log = applog(r)
     (r / "app.log").write_text(log)
@@ -646,7 +687,12 @@ def cmd_meeting(a):
            "health": {k: (before.get(k) or {}).get("health") for k in ("mic", "system")},
            "final_words": words, "lines": summ.get("utteranceCount"), "cpu_s_app": summ.get("cpuSeconds"),
            "peak_rss_mb_app": mb(summ.get("peakRssBytes") or 0), "energy": e,
-           "panics": len(re.findall(r"panicked", log)), "errors": len(re.findall(r" ERROR ", log))}
+           "panics": len(re.findall(r"panicked", log)), "errors": len(re.findall(r" ERROR ", log)),
+           "sys_capture": (summ.get("beforeStop") or {}).get("captureStats", {}).get("system"),
+           "tap": (summ.get("beforeStop") or {}).get("tap") or (summ.get("beforeStop") or {}).get("captureStats", {}).get("tap"),
+           "system_speech_ms": summ.get("systemSpeechMs"), "mic_speech_ms": summ.get("micSpeechMs"),
+           "watchdog_restarts": len(re.findall(r"restarting its capture", log)),
+           "tap_restart_lines": len(re.findall(r"system audio capture restart|started a new one|rebuilt", log))}
     row.pop("dropped")
     append(out, "meeting", row)
 
@@ -759,7 +805,7 @@ def cmd_ui(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("launch", "idle", "meeting", "ui", "presplit", "perf", "glpanic"):
+    for name in ("launch", "idle", "meeting", "ui", "presplit", "perf", "glpanic", "sprof"):
         s = sub.add_parser(name)
         s.add_argument("--out", required=True)
         s.add_argument("--models")
@@ -771,6 +817,9 @@ def main():
     sub.choices["idle"].add_argument("--settle", type=int, default=45)
     sub.choices["idle"].add_argument("--secs", type=int, default=180)
     sub.choices["idle"].add_argument("--label", default="idle")
+    sp_ = sub.choices["sprof"]
+    sp_.add_argument("--arm", required=True); sp_.add_argument("--secs", type=int, default=25)
+    sp_.add_argument("--samply", required=True)
     gp = sub.choices["glpanic"]
     gp.add_argument("--pkg", required=True); gp.add_argument("--rounds", type=int, default=12)
     gp.add_argument("--secs", type=int, default=12); gp.add_argument("--after", type=int, default=25)
@@ -781,13 +830,15 @@ def main():
     m.add_argument("--pkg", required=True); m.add_argument("--fix", required=True)
     m.add_argument("--mins", type=int, default=60); m.add_argument("--engine", default="default")
     m.add_argument("--linger", type=int, default=90); m.add_argument("--name")
+    m.add_argument("--env", action="append"); m.add_argument("--no-play", action="store_true")
+    m.add_argument("--pause-audiod"); m.add_argument("--rust-log")
     u = sub.choices["ui"]
     u.add_argument("--pkg", required=True); u.add_argument("--runs", type=int, default=3)
     u.add_argument("--seed", type=int, default=500)
     ps = sub.choices["presplit"]
     ps.add_argument("--pkg", required=True); ps.add_argument("--timeout", type=int, default=900)
     a = ap.parse_args()
-    {"glpanic": cmd_glpanic, "perf": cmd_perf, "presplit": cmd_presplit, "launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
+    {"sprof": cmd_sprof, "glpanic": cmd_glpanic, "perf": cmd_perf, "presplit": cmd_presplit, "launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
 
 
 if __name__ == "__main__":
