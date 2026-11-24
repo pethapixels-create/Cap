@@ -1,0 +1,60 @@
+name: cb-tb
+on:
+  push:
+    branches: ["ci/cb-tb*"]
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: base, ref: 635ac81b36b1d32ab0f5a8bdf2bc7f6b1bd2c9d6 }
+          - { name: head, ref: 9af6989fa56869b3ad0cfe8e98a0af18dfd18d58 }
+    runs-on: ubuntu-22.04
+    timeout-minutes: 200
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check out the build
+        run: git checkout --detach ${{ matrix.ref }} && git log --oneline -1
+      - uses: ./.github/actions/install-desktop-deps
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Run setup
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      - name: Stage PipeWire headers
+        run: |
+          dir="$(bash scripts/stage-pipewire-headers.sh "$RUNNER_TEMP/pipewire-headers")"
+          echo "PKG_CONFIG_PATH=$dir" >> "$GITHUB_ENV"
+      - name: Prepare GPUI dependency
+        run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - name: Swap
+        run: sudo fallocate -l 16G /mnt/swapfile2 && sudo chmod 600 /mnt/swapfile2 && sudo mkswap /mnt/swapfile2 && sudo swapon /mnt/swapfile2
+      - name: Build the real-app tests
+        run: |
+          set -euo pipefail
+          cargo +1.95.0 test --manifest-path apps/desktop-gpui/Cargo.toml --locked --bin cap-gpui --no-run --message-format=json \
+            | python3 -c 'import json, sys
+          for line in sys.stdin:
+              m = json.loads(line)
+              if m.get("reason") == "compiler-artifact" and m.get("executable") and m["target"]["name"] == "cap-gpui" and m["profile"]["test"]:
+                  print(m["executable"])' > "$RUNNER_TEMP/test-binary"
+          mkdir -p "$RUNNER_TEMP/build/libs"
+          cp "$(cat "$RUNNER_TEMP/test-binary")" "$RUNNER_TEMP/build/real-app-tests"
+          strip --strip-debug "$RUNNER_TEMP/build/real-app-tests"
+          cp -a target/native-deps/lib/. "$RUNNER_TEMP/build/libs/"
+          git rev-parse HEAD > "$RUNNER_TEMP/build/REV"
+          tar -C "$RUNNER_TEMP/build" -czf "$RUNNER_TEMP/tb.tgz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cb-tb-${{ matrix.name }}
+          path: ${{ runner.temp }}/tb.tgz
+          retention-days: 3
