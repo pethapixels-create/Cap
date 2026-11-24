@@ -76,12 +76,24 @@ jobs:
         shell: bash
         run: cargo build --locked -p cap
 
+      - name: First frames of a real screen recording
+        shell: bash
+        continue-on-error: true
+        env:
+          CAP_PROBE_DUMP_DIR: ${{ github.workspace }}/probe-out/rec1
+        run: |
+          mkdir -p probe-out/rec1
+          ./target/debug/cap.exe --log-level info selftest playback --project .github/probe-fixture/rec1.cap --skip-export --json > probe-out/rec1/report.json 2> probe-out/rec1/playback.log || echo "exit $?"
+          grep -a -E "PROBE (frame|display) n=([0-9]|1[01]) |PROBE ffmpeg" probe-out/rec1/playback.log | head -40 || true
+
       - name: Stage probe binary
         shell: bash
         run: |
-          mkdir -p probe-out
-          cp target/debug/cap.exe probe-out/cap-probe.exe
-          ls -la probe-out
+          mkdir -p probe-out/bin
+          cp target/debug/cap.exe probe-out/bin/cap-probe.exe
+          cp target/debug/dxcompiler.dll target/debug/dxil.dll probe-out/bin/
+          cp target/ffmpeg/bin/*.dll probe-out/bin/
+          ls -la probe-out/bin
 
       - name: Upload probe output
         if: always()

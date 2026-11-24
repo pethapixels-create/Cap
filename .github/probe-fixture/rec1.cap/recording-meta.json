@@ -1,0 +1,29 @@
+{
+  "platform": "Windows",
+  "pretty_name": "Generic PnP Monitor (Display) 2026-11-24 10.49 AM",
+  "sharing": null,
+  "segments": [
+    {
+      "display": {
+        "path": "content/segments/segment-0/display.mp4",
+        "fps": 60,
+        "start_time": 0.1437146
+      },
+      "cursor": "content/segments/segment-0/cursor.json",
+      "keyboard": "content/segments/segment-0/keyboard.bin"
+    }
+  ],
+  "cursors": {
+    "0": {
+      "imagePath": "content/cursors/cursor_0.png",
+      "hotspot": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "shape": "Windows|Arrow"
+    }
+  },
+  "status": {
+    "status": "Complete"
+  }
+}
