@@ -1,0 +1,110 @@
+name: Scratch Notes hardening runs (builder BW)
+# Temporary branch (deleted after use): builds the real app once with the meeting hooks, then runs
+# the Notes hardening cases (.bw/bw.sh) against a local fault-injecting
+# stub of the meeting endpoints and local calendar feeds. With .bw/bw.patch present, the build and the tests include it.
+# Nothing here reaches a Cap server. Nothing here ships.
+
+on:
+  push:
+    branches: ['ci/bw-r*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+
+jobs:
+  build:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-desktop-deps
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-unknown-linux-gnu
+          prefix-key: v1-rust-meetings
+          save-cache: "false"
+          workspaces: apps/desktop-gpui -> target
+      - run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      - run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - name: Build base, then with .bw/bw.patch
+        run: |
+          set -e
+          cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
+          cp apps/desktop-gpui/target/release/cap-gpui apps/desktop-gpui/target/release/cap-gpui-base
+          if [ -f .bw/bw.patch ]; then
+            git apply .bw/bw.patch && git status --short
+            cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
+          fi
+      - run: tar -czf "$RUNNER_TEMP/app.tgz" -C "$GITHUB_WORKSPACE" apps/desktop-gpui/target/release/cap-gpui apps/desktop-gpui/target/release/cap-gpui-base target/native-deps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: ${{ runner.temp }}/app.tgz
+          retention-days: 2
+
+  runs:
+    needs: build
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [cal-base, links-base, disk-base, life-base]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: ${{ runner.temp }}
+      - run: tar -xzf "$RUNNER_TEMP/app.tgz" -C "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/install-desktop-deps
+      - run: |
+          sudo apt-get install -y -qq --no-install-recommends xvfb x11-utils xdotool imagemagick dbus \
+            pulseaudio pulseaudio-utils libasound2-plugins ffmpeg openssl openbox > /dev/null
+          if ! command -v google-chrome > /dev/null; then
+            curl -fsSL -o "$RUNNER_TEMP/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y -qq "$RUNNER_TEMP/chrome.deb" > /dev/null
+          fi
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/meeting-models
+          key: meeting-models-v1-${{ hashFiles('scripts/ci/meetings/models.sh') }}
+      - if: ${{ !startsWith(matrix.group, 'cal') }}
+        run: bash scripts/ci/meetings/models.sh "$RUNNER_TEMP/meeting-models"
+      - name: Runs
+        run: |
+          env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 \
+            LD_LIBRARY_PATH="$GITHUB_WORKSPACE/target/native-deps/lib" \
+            ORT_DYLIB_PATH="$GITHUB_WORKSPACE/target/native-deps/onnxruntime/lib/libonnxruntime.so" \
+            CAP_MEETINGS_MODELS="$RUNNER_TEMP/meeting-models" \
+            dbus-run-session -- bash .bw/bw.sh \
+            "$GITHUB_WORKSPACE/apps/desktop-gpui/target/release/cap-gpui${{ endsWith(matrix.group, '-base') && '-base' || '' }}" \
+            "$RUNNER_TEMP/bw" ${{ matrix.group }}
+          for f in "$RUNNER_TEMP"/bw/*/facts.txt; do echo "== $f"; cat "$f"; done
+      - if: always()
+        run: find "$RUNNER_TEMP/bw" -name 'data' -type d -prune -exec rm -rf {} + ; find "$RUNNER_TEMP/bw" -name 'home' -type d -prune -exec rm -rf {} + ; find "$RUNNER_TEMP/bw" -name chrome -type d -prune -exec rm -rf {} + ; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bw-${{ matrix.group }}
+          path: ${{ runner.temp }}/bw
+          retention-days: 3
