@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, windows, mac-arm, mac-x64]
+        os: [windows]
         variant: [ship-pre, ship-head, hx-head]
         include:
           - os: linux
@@ -116,8 +116,7 @@ jobs:
               ;;
           esac
           ls -la "$P/bin" "$P/lib" | head -60
-          tar czf "$RUNNER_TEMP/by-${{ matrix.os }}-${{ matrix.variant }}.tgz" -C "$P" .
-          ls -la "$RUNNER_TEMP"/by-*.tgz
+          cd "$RUNNER_TEMP" && tar czf "by-${{ matrix.os }}-${{ matrix.variant }}.tgz" -C pkg . && ls -la by-*.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: by-${{ matrix.os }}-${{ matrix.variant }}
