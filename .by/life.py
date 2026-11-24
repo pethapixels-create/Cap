@@ -54,11 +54,11 @@ def append(out, name, row):
 
 
 # ---------------------------------------------------------------- profile + spawn
-def profile(r, notes, models=None, engine="default", stub_port=None):
+def profile(r, notes, models=None, engine="default", stub_port=None, welcome=False):
     r = Path(r).resolve()
     for d in ("home", "data/meetings", "logs", "rec"):
         (r / d).mkdir(parents=True, exist_ok=True)
-    gs = {"hasCompletedOnboarding": True, "hasCompletedStartup": True, "enableNotifications": False,
+    gs = {"hasCompletedOnboarding": not welcome, "hasCompletedStartup": not welcome, "enableNotifications": False,
           "enableTelemetry": False, "recordingCountdown": 0}
     store = {"general_settings": gs}
     if stub_port:
@@ -400,8 +400,8 @@ def parse_arms(specs):
     arms = []
     for spec in specs:
         name, rest = spec.split("=", 1)
-        notes = rest.endswith(":notes")
-        arms.append((name, rest[:-6] if notes else rest, notes))
+        pkg, *flags = rest.split(":")
+        arms.append((name, pkg, flags))
     return arms
 
 
@@ -411,8 +411,10 @@ def cmd_launch(a):
     win = Windows()
     for rnd in range(a.rounds + 1):
         order = arms if rnd % 2 == 0 else list(reversed(arms))
-        for name, pkg, notes in order:
-            r = profile(out / "runs" / f"launch-{name}-{rnd}", notes, a.models if notes else None)
+        for name, pkg, flags in order:
+            notes = "notes" in flags
+            r = profile(out / "runs" / f"launch-{name}-{rnd}", notes, a.models if notes else None,
+                        welcome="welcome" in flags)
             win.before()
             p, t0 = spawn(pkg, r)
             shown = win.wait(p.pid, 60)
@@ -433,8 +435,10 @@ def cmd_idle(a):
     arms = parse_arms(a.arm)
     for rnd in range(a.rounds):
         order = arms if rnd % 2 == 0 else list(reversed(arms))
-        for name, pkg, notes in order:
-            r = profile(out / "runs" / f"idle-{name}-{rnd}", notes, a.models if notes else None)
+        for name, pkg, flags in order:
+            notes = "notes" in flags
+            r = profile(out / "runs" / f"{a.label}-{name}-{rnd}", notes, a.models if notes else None,
+                        welcome="welcome" in flags)
             p, t0 = spawn(pkg, r)
             time.sleep(a.settle)
             energy = Energy(out / "runs" / f"idle-{name}-{rnd}" / "powermetrics.txt", a.secs)
@@ -444,15 +448,60 @@ def cmd_idle(a):
             e = energy.finish()
             rows = smp.rows
             kill(p)
-            row = {"cmd": "idle", "arm": name, "round": rnd, "secs": a.secs,
+            row = {"cmd": a.label, "arm": name, "round": rnd, "secs": a.secs,
                    "cpu_pct": (rate(rows, "cpu") or 0) * 100, "ctx_s": rate(rows, "ctx"),
                    "wakeups_s": rate(rows, "wakeups"), "disk_w_kb_s": (rate(rows, "disk_w") or 0) / 1024,
                    "rss_mb_end": rows[-1]["rss"] / 1048576 if rows else None,
                    "rss_mb_max": max(x["rss"] for x in rows) / 1048576 if rows else None,
                    "footprint_mb_end": rows[-1]["footprint"] / 1048576 if rows else None,
                    "procs": rows[-1]["n"] if rows else None, "energy": e}
-            append(out, "idle", row)
+            append(out, a.label, row)
             time.sleep(3)
+
+
+def cmd_perf(a):
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    name, pkg, flags = parse_arms([a.arm])[0]
+    notes = "notes" in flags
+    r = profile(out / "runs" / f"perf-{name}", notes, a.models if notes else None, welcome="welcome" in flags)
+    p, t0 = spawn(pkg, r)
+    time.sleep(a.settle)
+    data = r / "perf.data"
+    subprocess.run(["perf", "record", "-F", "499", "-g", "-o", str(data), "-p", str(p.pid), "--", "sleep", str(a.secs)],
+                   capture_output=True)
+    kill(p)
+    for sort, n in (("dso", 30), ("dso,sym", 60), ("comm", 20)):
+        rep = subprocess.run(["perf", "report", "-i", str(data), "--stdio", "--no-children", "--sort", sort,
+                              "--percent-limit", "0.5"], capture_output=True, text=True).stdout
+        lines = [l for l in rep.splitlines() if l.strip() and not l.startswith("#")][:n]
+        (out / f"perf-{name}-{sort.replace(',', '-')}.txt").write_text("\n".join(lines) + "\n")
+        print(f"== perf {name} by {sort}"); print("\n".join(lines[:25]), flush=True)
+
+
+def cmd_glpanic(a):
+    """GLES-only loop (Vulkan ICDs hidden, as on a box with no Vulkan driver): a Studio recording that
+    opens the editor when it ends, again and again; counts wgpu adapter-context panics per round."""
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    for rnd in range(a.rounds):
+        r = profile(out / "runs" / f"gl-{rnd}", False)
+        extra = {"VK_ICD_FILENAMES": "/nonexistent.json", "VK_DRIVER_FILES": "/nonexistent.json",
+                 "CAP_GPUI_AUTO_RECORD": f"studio:{a.secs}", "RUST_LOG": "info"}
+        p, t0 = spawn(a.pkg, r, extra)
+        for _ in range(int((a.secs + a.after) * 4)):
+            if p.poll() is not None:
+                break
+            time.sleep(0.25)
+        alive = p.poll() is None
+        kill(p)
+        log = applog(r)
+        (r / "app.log").write_text(log)
+        row = {"cmd": "glpanic", "round": rnd, "alive": alive,
+               "lock_panics": log.count("Could not lock adapter context"),
+               "panics": len(re.findall(r"panic", log)),
+               "editor": bool(re.search(r"editor (window )?opened|open_editor|editor ready", log)),
+               "backend": (re.search(r"backend[=: ]+\"?(\w+)", log) or [None, None])[1],
+               "software": "is_software_adapter=true" in log or "software=true" in log}
+        append(out, "glpanic", row)
 
 
 def stub(port, log):
@@ -710,7 +759,7 @@ def cmd_ui(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("launch", "idle", "meeting", "ui", "presplit"):
+    for name in ("launch", "idle", "meeting", "ui", "presplit", "perf", "glpanic"):
         s = sub.add_parser(name)
         s.add_argument("--out", required=True)
         s.add_argument("--models")
@@ -721,6 +770,13 @@ def main():
     sub.choices["idle"].add_argument("--rounds", type=int, default=2)
     sub.choices["idle"].add_argument("--settle", type=int, default=45)
     sub.choices["idle"].add_argument("--secs", type=int, default=180)
+    sub.choices["idle"].add_argument("--label", default="idle")
+    gp = sub.choices["glpanic"]
+    gp.add_argument("--pkg", required=True); gp.add_argument("--rounds", type=int, default=12)
+    gp.add_argument("--secs", type=int, default=12); gp.add_argument("--after", type=int, default=25)
+    pf = sub.choices["perf"]
+    pf.add_argument("--arm", required=True); pf.add_argument("--settle", type=int, default=15)
+    pf.add_argument("--secs", type=int, default=20)
     m = sub.choices["meeting"]
     m.add_argument("--pkg", required=True); m.add_argument("--fix", required=True)
     m.add_argument("--mins", type=int, default=60); m.add_argument("--engine", default="default")
@@ -731,7 +787,7 @@ def main():
     ps = sub.choices["presplit"]
     ps.add_argument("--pkg", required=True); ps.add_argument("--timeout", type=int, default=900)
     a = ap.parse_args()
-    {"presplit": cmd_presplit, "launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
+    {"glpanic": cmd_glpanic, "perf": cmd_perf, "presplit": cmd_presplit, "launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-linux-mid presplit launch idle ui meeting
-mac-arm-8gb presplit launch idle ui meeting
-mac-intel presplit launch idle ui meeting meeting-local
-windows-mid presplit launch idle ui meeting
+linux-mid welcome perf glpanic
+windows-mid welcome
+mac-arm-8gb welcome

@@ -5,7 +5,7 @@ name: Scratch BY lifecycle measurements
 
 on:
   push:
-    branches: [ci/by-measure, ci/by-measure-win]
+    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m]
 
 permissions:
   contents: read
@@ -61,6 +61,8 @@ jobs:
       - name: Unpack
         if: steps.plan.outputs.go == '1'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p "$W"
@@ -71,6 +73,13 @@ jobs:
             tar -xzf "$A" -C "$D"
             echo "$v $(cat "$W/$v/commit.txt")"
           done
+          FIXRUN=$(grep -E "^${{ matrix.os }}-fix " .by/build-run.txt | cut -d' ' -f2 || true)
+          if [ -n "$FIXRUN" ]; then
+            gh run download "$FIXRUN" -R "$GITHUB_REPOSITORY" -n "by-${{ matrix.os }}-ship-fix" -D "$RUNNER_TEMP/dl/fix"
+            A="$RUNNER_TEMP/dl/fix/by-${{ matrix.os }}-ship-fix.tgz"; D="$W/ship-fix"; mkdir -p "$D"
+            if [ "$RUNNER_OS" = Windows ]; then A=$(cygpath -u "$A"); D=$(cygpath -u "$D"); fi
+            tar -xzf "$A" -C "$D"; echo "ship-fix $(cat "$W/ship-fix/commit.txt")"
+          fi
           cp .by/life.py .by/winwait.swift scripts/ci/meetings/stub_server.py "$W/"
       - if: steps.plan.outputs.go == '1' && runner.os == 'Linux'
         uses: ./.github/actions/install-desktop-deps
@@ -79,6 +88,8 @@ jobs:
         run: |
           sudo apt-get install -y -qq --no-install-recommends xvfb x11-utils pulseaudio pulseaudio-utils \
             ffmpeg mesa-vulkan-drivers libvulkan1 python3-psutil > /dev/null
+          sudo apt-get install -y -qq "linux-tools-$(uname -r)" linux-tools-common > /dev/null 2>&1 || true
+          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 > /dev/null || true
           nproc; free -m
       - name: Tools (macOS)
         if: steps.plan.outputs.go == '1' && (runner.os == 'macOS')
@@ -148,6 +159,16 @@ jobs:
           for s in $STEPS; do
             echo "::group::$s"
             case $s in
+              welcome)
+                A="--arm pre=ship-pre:welcome --arm head=ship-head:welcome"
+                [ -d ship-fix ] && A="$A --arm fix=ship-fix:welcome"
+                $PY life.py idle --label welcome --out out $A --rounds 3 --settle 15 --secs 60 ;;
+              glpanic)
+                $PY life.py glpanic --out out --pkg ship-head --rounds 12
+                $PY life.py glpanic --out out --pkg ship-head --rounds 8 --secs 30 ;;
+              perf)
+                $PY life.py perf --out out --arm head=ship-head:welcome
+                [ -d ship-fix ] && $PY life.py perf --out out --arm fix=ship-fix:welcome ;;
               presplit) $PY life.py presplit --out out --models models --pkg ship-head --timeout 900 ;;
               launch) $PY life.py launch --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 7 ;;
               idle) $PY life.py idle --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 2 ;;
@@ -172,6 +193,8 @@ jobs:
           name: res-${{ matrix.box }}
           path: |
             ${{ runner.temp }}/by/out/*.jsonl
+            ${{ runner.temp }}/by/out/perf-*.txt
+            ${{ runner.temp }}/by/out/runs/gl-*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.out
             ${{ runner.temp }}/by/out/runs/*/summary.json
