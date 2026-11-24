@@ -1,0 +1,29 @@
+name: Scratch BY tap witness
+# Builds BY's scratch tap-record example (an independent computer-audio witness) for the Mac mini.
+on:
+  push:
+    branches: [ci/by-taprec]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Build
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/mp"; cp -R apps/desktop-gpui/meeting-platform "$D"
+          cp .by/tap-record.rs "$D/examples/"
+          printf '\n[workspace]\n' >> "$D/Cargo.toml"
+          cargo build --release --example tap-record --manifest-path "$D/Cargo.toml"
+          cp "$D/target/release/examples/tap-record" "$RUNNER_TEMP/tap-record"
+          codesign --force -s - "$RUNNER_TEMP/tap-record"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tap-record
+          path: ${{ runner.temp }}/tap-record
+          retention-days: 3
