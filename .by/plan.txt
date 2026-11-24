@@ -1,4 +1,4 @@
-linux-mid smoke
-mac-arm-8gb smoke
-mac-intel smoke
-windows-mid smoke
+linux-mid launch idle ui meeting
+mac-arm-8gb launch idle ui meeting
+mac-intel launch idle ui meeting meeting-local
+windows-mid launch idle ui meeting

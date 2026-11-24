@@ -66,7 +66,8 @@ jobs:
           mkdir -p "$W"
           for v in ship-pre ship-head hx-head; do
             mkdir -p "$W/$v"
-            tar xzf "$RUNNER_TEMP/dl/by-${{ matrix.os }}-$v/by-${{ matrix.os }}-$v.tgz" -C "$W/$v"
+            TF=; [ "$RUNNER_OS" = Windows ] && TF=--force-local
+            tar $TF -xzf "$RUNNER_TEMP/dl/by-${{ matrix.os }}-$v/by-${{ matrix.os }}-$v.tgz" -C "$W/$v"
             echo "$v $(cat "$W/$v/commit.txt")"
           done
           cp .by/life.py .by/winwait.swift scripts/ci/meetings/stub_server.py "$W/"
@@ -142,7 +143,6 @@ jobs:
             export XDG_SESSION_TYPE=x11; unset WAYLAND_DISPLAY
           fi
           ENGINE=default; MINS=60
-          [ "${{ matrix.os }}" = mac-x64 ] && ENGINE=local
           STEPS=$(cat "$RUNNER_TEMP/steps.txt"); [ -z "$STEPS" ] && STEPS="launch idle ui meeting"
           for s in $STEPS; do
             echo "::group::$s"
@@ -156,6 +156,7 @@ jobs:
                 $PY life.py idle --out out --models models --arm pre=ship-pre --arm head-notes=ship-head:notes --rounds 1 --settle 10 --secs 30
                 $PY life.py ui --out out --pkg hx-head --runs 1
                 $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins 4 --engine $ENGINE --linger 30 ;;
+              meeting-local) $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins 20 --engine local --name meeting-local-20m ;;
               meeting10) $PY life.py meeting --out out --pkg hx-head --fix "$FIX" --models models --mins 10 --engine $ENGINE ;;
             esac
             echo "::endgroup::"

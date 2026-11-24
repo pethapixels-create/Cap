@@ -324,6 +324,16 @@ def sample(pid):
     return s
 
 
+def top_maps(pid, n=10):
+    """The process's largest mappings by resident size (MB), so a launch that maps a model shows it."""
+    try:
+        maps = psutil.Process(pid).memory_maps(grouped=True)
+    except (psutil.Error, NotImplementedError, OSError):
+        return None
+    maps = sorted(maps, key=lambda m: m.rss, reverse=True)[:n]
+    return [[Path(m.path).name if m.path else "?", round(m.rss / 1048576, 1)] for m in maps]
+
+
 class Sampler(threading.Thread):
     def __init__(self, pid, every):
         super().__init__(daemon=True)
@@ -402,8 +412,9 @@ def cmd_launch(a):
             shown = win.wait(p.pid, 60)
             time.sleep(max(0, t0 + a.hold - time.time()))
             s = sample(p.pid)
+            maps = top_maps(p.pid)
             kill(p)
-            row = {"cmd": "launch", "arm": name, "round": rnd, "warmup": rnd == 0,
+            row = {"cmd": "launch", "maps": maps, "arm": name, "round": rnd, "warmup": rnd == 0,
                    "window_ms": round((shown - t0) * 1000) if shown else None,
                    "rss_mb": s and s["rss"] / 1048576, "footprint_mb": s and s["footprint"] / 1048576,
                    "cpu_s": s and s["cpu"], "procs": s and s["n"]}
