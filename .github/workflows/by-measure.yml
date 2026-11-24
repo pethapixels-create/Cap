@@ -5,14 +5,14 @@ name: Scratch BY lifecycle measurements
 
 on:
   push:
-    branches: [ci/by-measure]
+    branches: [ci/by-measure, ci/by-measure-win]
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: by-measure
+  group: ${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -66,8 +66,9 @@ jobs:
           mkdir -p "$W"
           for v in ship-pre ship-head hx-head; do
             mkdir -p "$W/$v"
-            TF=; [ "$RUNNER_OS" = Windows ] && TF=--force-local
-            tar $TF -xzf "$RUNNER_TEMP/dl/by-${{ matrix.os }}-$v/by-${{ matrix.os }}-$v.tgz" -C "$W/$v"
+            A="$RUNNER_TEMP/dl/by-${{ matrix.os }}-$v/by-${{ matrix.os }}-$v.tgz"; D="$W/$v"
+            if [ "$RUNNER_OS" = Windows ]; then A=$(cygpath -u "$A"); D=$(cygpath -u "$D"); fi
+            tar -xzf "$A" -C "$D"
             echo "$v $(cat "$W/$v/commit.txt")"
           done
           cp .by/life.py .by/winwait.swift scripts/ci/meetings/stub_server.py "$W/"
