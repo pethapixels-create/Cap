@@ -20,9 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: fa, sha: 71f60d96ec22e661f2773e299d21087844c0f767 }
-          - { label: fb, sha: 0b17c43f38568bae71b1bb2b4ac3deb267832e25 }
-          - { label: mc, sha: 9a39305f8a264d76ba75f2f8291f45b5dfd62adf }
+          - { label: fa, sha: 61b28c882d832609f51f7fa0ab382b750b035e50 }
+          - { label: fb, sha: 5ca9764b8e043d72aeb535932dcf580b73820ee2 }
     runs-on: blacksmith-8vcpu-windows-2025
     timeout-minutes: 120
     steps:
