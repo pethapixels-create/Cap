@@ -1,0 +1,195 @@
+name: Scratch CD Notes persona walk
+# Temporary branch (deleted after use): builder CD's Cap Notes persona and accessibility walk.
+# Screen reader trees (AT-SPI, UI Automation), real Tab presses, 7 locales, text scaling, two
+# monitors, a two-core Windows run, and a macOS build for a local GUI pass. Scratch profiles and
+# synthetic meetings only. Nothing reaches a Cap server. Nothing ships.
+
+on:
+  push:
+    branches: [ci/cd-walk*]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+
+jobs:
+  linux:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-desktop-deps
+      - run: sudo apt-get install -y -qq --no-install-recommends xvfb imagemagick openbox dbus dbus-x11 xdotool x11-xserver-utils at-spi2-core gir1.2-atspi-2.0 python3-gi fonts-noto-cjk fonts-noto-core > /dev/null
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-unknown-linux-gnu
+          prefix-key: v1-rust-meetings
+          save-cache: "false"
+          workspaces: apps/desktop-gpui -> target
+      - run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      - run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - run: cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui 2>&1 | tail -2
+      - name: Walk
+        run: |
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/target/native-deps/lib"
+          APP="$GITHUB_WORKSPACE/apps/desktop-gpui/target/release/cap-gpui"
+          run_on() { # <display> <WxH> <out> <phases>
+            Xvfb "$1" -screen 0 "$2x24" > /dev/null 2>&1 &
+            local X=$!
+            sleep 2
+            DISPLAY=$1 XDG_SESSION_TYPE=x11 dbus-run-session -- bash -c '
+              openbox > /dev/null 2>&1 &
+              /usr/libexec/at-spi-bus-launcher --launch-immediately > /dev/null 2>&1 &
+              sleep 2
+              gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled "<true>" > /dev/null 2>&1
+              gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.freedesktop.DBus.Properties.Set org.a11y.Status ScreenReaderEnabled "<true>" > /dev/null 2>&1
+              bash .cd/walk.sh "$0" "$1" "$2"' "$APP" "$3" "$4"
+            kill $X 2>/dev/null
+          }
+          run_on :99 1600x1000 "$RUNNER_TEMP/walk/main" "a11y locales"
+          run_on :98 3200x2000 "$RUNNER_TEMP/walk/scale" "scale"
+          run_on :97 3200x1000 "$RUNNER_TEMP/walk/mon" "monitors"
+      - if: always()
+        run: find "$RUNNER_TEMP/walk" -type d -name work -prune -exec rm -rf {} + ; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cd-walk-linux
+          path: ${{ runner.temp }}/walk
+          retention-days: 3
+
+  build-win:
+    runs-on: blacksmith-8vcpu-windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-pc-windows-msvc
+          prefix-key: v1-rust-meetings
+          save-cache: "false"
+          workspaces: apps/desktop-gpui -> target
+      - shell: bash
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
+      - shell: bash
+        run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/gpui-windows-shaders"
+          cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
+          cp apps/desktop-gpui/target/release/cap-gpui.exe "$stage/cap-gpui.exe"
+          cp ../zed-cap/crates/gpui_windows/src/*.hlsl "$stage/gpui-windows-shaders/"
+          printf '%s' "$GITHUB_WORKSPACE" > "$stage/build-workspace.txt"
+          printf '%s' "$(cd ../zed-cap && pwd -W)" > "$stage/build-zed.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cd-walk-win-app
+          path: ${{ runner.temp }}/stage
+          retention-days: 1
+
+  run-win:
+    needs: build-win
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cd-walk-win-app
+          path: ${{ runner.temp }}/app
+      - shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\app"
+          $workspace = (Get-Content "$app\build-workspace.txt" -Raw).Trim()
+          if ($workspace -ne $env:GITHUB_WORKSPACE) {
+            New-Item -ItemType Directory -Force (Split-Path $workspace) | Out-Null
+            cmd /c mklink /J "$workspace" "$env:GITHUB_WORKSPACE"
+          }
+          $shaders = Join-Path (Get-Content "$app\build-zed.txt" -Raw).Trim() "crates\gpui_windows\src"
+          New-Item -ItemType Directory -Force $shaders | Out-Null
+          Copy-Item "$app\gpui-windows-shaders\*.hlsl" $shaders
+      - shell: bash
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
+      - shell: bash
+        run: |
+          cp "$GITHUB_WORKSPACE"/target/release/*.dll "$RUNNER_TEMP/app/" 2>/dev/null || true
+          bash .cd/winwalk.sh "$RUNNER_TEMP/app/cap-gpui.exe" "$RUNNER_TEMP/walk"
+      - if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/walk/work"; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cd-walk-win
+          path: ${{ runner.temp }}/walk
+          retention-days: 3
+
+  build-mac:
+    runs-on: blacksmith-6vcpu-macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-darwin
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: aarch64-apple-darwin
+          prefix-key: v1-rust-gpui
+          save-cache: "false"
+          workspaces: apps/desktop-gpui -> target
+      - run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: aarch64-apple-darwin
+      - run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/bin" "$stage/Frameworks"
+          cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
+          cp apps/desktop-gpui/target/release/cap-gpui "$stage/bin/cap-gpui"
+          codesign --force -s - "$stage/bin/cap-gpui"
+          cp -RL target/Frameworks/Spacedrive.framework "$stage/Frameworks/"
+          test -f "$stage/Frameworks/Spacedrive.framework/Libraries/libavcodec.61.19.100.dylib"
+          cp -R .cd "$stage/cd"
+          tar -C "$stage" -czf "$RUNNER_TEMP/cd-mac.tgz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cd-walk-mac-app
+          path: ${{ runner.temp }}/cd-mac.tgz
+          retention-days: 2
