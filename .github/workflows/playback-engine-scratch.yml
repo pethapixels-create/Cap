@@ -1,0 +1,202 @@
+name: Playback engine scratch
+
+on:
+  push:
+    branches:
+      - "scratch/playback-engine*"
+
+permissions:
+  contents: read
+
+# "label=commit label=commit" per platform; an empty list skips it.
+env:
+  ARMS_MAC: "base=a908075711d7e0ecdda2fa1f7eb95ac257374d3f head=a1a95a3b8cd18c6c3f179a608b87167b73daaf30"
+  ARMS_LINUX: "head=HEAD"
+  ARMS_WIN: "head=HEAD"
+  ROUNDS: "3"
+  FRAMES: "600"
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+
+jobs:
+  plan:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      mac: ${{ steps.arms.outputs.mac }}
+      linux: ${{ steps.arms.outputs.linux }}
+      win: ${{ steps.arms.outputs.win }}
+    steps:
+      - id: arms
+        run: |
+          echo "mac=$ARMS_MAC" >> "$GITHUB_OUTPUT"
+          echo "linux=$ARMS_LINUX" >> "$GITHUB_OUTPUT"
+          echo "win=$ARMS_WIN" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: macOS engine
+    needs: plan
+    if: needs.plan.outputs.mac != ''
+    runs-on: blacksmith-6vcpu-macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CapSoftware/cap-performance-fixtures
+          path: performance-fixtures
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: aarch64-apple-darwin
+          prefix-key: v1-playback-engine
+          save-cache: "true"
+          cache-on-failure: "true"
+      - run: node scripts/setup.js
+      - name: Build
+        env:
+          ARMS: ${{ needs.plan.outputs.mac }}
+        run: |
+          bash .github/playback-perf/engine-arms.sh "$RUNNER_TEMP/bins" ""
+          cp -R "$GITHUB_WORKSPACE/target/Frameworks" "$RUNNER_TEMP/bins/Frameworks"
+      - name: Bench
+        run: |
+          set -uo pipefail
+          for mode in "--bgra-surface" ""; do
+            python3 .github/playback-perf/engine.py --bins "$RUNNER_TEMP/bins" \
+              --fixture "$GITHUB_WORKSPACE/performance-fixtures/reference-recording.cap" \
+              --out "$RUNNER_TEMP/bench/${mode:-rgba}" --rounds "$ROUNDS" --frames "$FRAMES" --extra "$mode" \
+              --lib-dir "$RUNNER_TEMP/bins/Frameworks/Spacedrive.framework/Libraries" \
+              --label "macOS Blacksmith 6 vCPU" --summary "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Print one log
+        if: always()
+        run: for log in "$RUNNER_TEMP"/bench/*/half-*-0.log; do echo "=== $log"; cut -c1-220 "$log" | tail -90; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-macos
+          path: |
+            ${{ runner.temp }}/bins
+            ${{ runner.temp }}/bench
+          retention-days: 5
+
+  linux:
+    name: Linux engine
+    needs: plan
+    if: needs.plan.outputs.linux != ''
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CapSoftware/cap-performance-fixtures
+          path: performance-fixtures
+          persist-credentials: false
+      - name: Install Linux desktop dependencies
+        uses: ./.github/actions/install-desktop-deps
+      - run: sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 >/dev/null
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-unknown-linux-gnu
+          prefix-key: v1-playback-engine
+          save-cache: "true"
+          cache-on-failure: "true"
+      - run: node scripts/setup.js
+      - name: Build
+        env:
+          ARMS: ${{ needs.plan.outputs.linux }}
+        run: |
+          bash .github/playback-perf/engine-arms.sh "$RUNNER_TEMP/bins" ""
+          mkdir -p "$RUNNER_TEMP/bins/libs"
+          cp -a target/native-deps/lib/. "$RUNNER_TEMP/bins/libs/"
+      - name: Bench (lavapipe)
+        run: |
+          set -uo pipefail
+          export VK_LOADER_LAYERS_DISABLE=VK_LAYER_MESA_device_select
+          python3 .github/playback-perf/engine.py --bins "$RUNNER_TEMP/bins" \
+            --fixture "$GITHUB_WORKSPACE/performance-fixtures/reference-recording.cap" \
+            --out "$RUNNER_TEMP/bench" --rounds "$ROUNDS" --frames "$FRAMES" \
+            --lib-dir "$RUNNER_TEMP/bins/libs" \
+            --label "Linux Blacksmith 8 vCPU, lavapipe" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Print one log
+        if: always()
+        run: for log in "$RUNNER_TEMP"/bench/half-*-0.log; do echo "=== $log"; cut -c1-220 "$log" | tail -90; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-linux
+          path: |
+            ${{ runner.temp }}/bins
+            ${{ runner.temp }}/bench
+          retention-days: 5
+
+  windows:
+    name: Windows engine
+    needs: plan
+    if: needs.plan.outputs.win != ''
+    runs-on: windows-2022
+    timeout-minutes: 150
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CapSoftware/cap-performance-fixtures
+          path: performance-fixtures
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-pc-windows-msvc
+          prefix-key: v1-playback-engine
+          save-cache: "true"
+          cache-on-failure: "true"
+      - shell: bash
+        run: node scripts/setup.js
+      - name: Build
+        shell: bash
+        env:
+          ARMS: ${{ needs.plan.outputs.win }}
+        run: |
+          bash .github/playback-perf/engine-arms.sh "$RUNNER_TEMP/bins" ".exe"
+          mkdir -p "$RUNNER_TEMP/bins/libs"
+          cp target/ffmpeg/bin/*.dll "$RUNNER_TEMP/bins/libs/" || true
+          cp target/release/*.dll "$RUNNER_TEMP/bins/libs/" 2>/dev/null || true
+          ls "$RUNNER_TEMP/bins/libs" | head -30
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bench (WARP)
+        shell: bash
+        run: |
+          set -uo pipefail
+          python .github/playback-perf/engine.py --bins "$RUNNER_TEMP/bins" \
+            --fixture "$GITHUB_WORKSPACE/performance-fixtures/reference-recording.cap" \
+            --out "$RUNNER_TEMP/bench" --rounds "$ROUNDS" --frames "$FRAMES" \
+            --lib-dir "$RUNNER_TEMP/bins/libs" \
+            --label "Windows hosted 2022 (WARP)" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Print one log
+        if: always()
+        shell: bash
+        run: for log in "$RUNNER_TEMP"/bench/half-*-0.log; do echo "=== $log"; cut -c1-220 "$log" | tail -90; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-windows
+          path: |
+            ${{ runner.temp }}/bins
+            ${{ runner.temp }}/bench
+          retention-days: 5
