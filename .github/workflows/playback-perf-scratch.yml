@@ -5,23 +5,39 @@ on:
     branches:
       - "scratch/playback-perf*"
 
-concurrency:
-  group: playback-perf-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
+# Each list is "label=commit label=commit": every arm is built in one tree and
+# benched interleaved. An empty list skips that platform.
 env:
-  BASE_REF: ""
+  ARMS_MAC: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=e7ad384788588176130074d2bb58a602bd4d1562"
+  ARMS_LINUX: "head=HEAD"
+  ARMS_WIN: ""
   ROUNDS: "5"
   KINDS: "play,edit"
   CARGO_PROFILE_RELEASE_LTO: "false"
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
 jobs:
+  plan:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      mac: ${{ steps.arms.outputs.mac }}
+      linux: ${{ steps.arms.outputs.linux }}
+      win: ${{ steps.arms.outputs.win }}
+    steps:
+      - id: arms
+        run: |
+          echo "mac=$ARMS_MAC" >> "$GITHUB_OUTPUT"
+          echo "linux=$ARMS_LINUX" >> "$GITHUB_OUTPUT"
+          echo "win=$ARMS_WIN" >> "$GITHUB_OUTPUT"
+
   macos:
     name: macOS build and bench
+    needs: plan
+    if: needs.plan.outputs.mac != ''
     runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 170
     env:
@@ -55,30 +71,15 @@ jobs:
         env:
           RUST_TARGET_TRIPLE: ${{ env.TARGET }}
       - name: Build
+        env:
+          ARMS: ${{ needs.plan.outputs.mac }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/bins"
-          release="$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release"
-          build() {
-            cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked \
-              --target "$TARGET" --release --bin cap-gpui 2>&1 | grep -v "^ *Compiling" | tail -8
-            mkdir -p "$out/$1"
-            cp "$release/cap-gpui" "$out/$1/cap-gpui"
-          }
-          build head
-          if [[ -n "$BASE_REF" ]]; then
-            git diff --name-only --diff-filter=A "$BASE_REF" HEAD -- apps crates | xargs -I{} rm -f "{}"
-            git checkout "$BASE_REF" -- apps crates Cargo.toml Cargo.lock
-            git diff --stat HEAD -- apps crates | tail -3
-            build base
-            if cmp -s "$out/head/cap-gpui" "$out/base/cap-gpui"; then echo "::error::identical binaries"; exit 1; fi
-          fi
+          bash .github/playback-perf/build-arms.sh "$out" \
+            "$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release" "" --target "$TARGET"
           cp -R "$GITHUB_WORKSPACE/target/Frameworks" "$out/Frameworks"
-          for side in head base; do
-            [[ -d "$out/$side" ]] && ln -sfn ../Frameworks "$out/$side/Frameworks"
-          done
-          git rev-parse HEAD > "$out/head.sha"
-          ls -la "$out" "$out/head"
+          while read -r label _; do ln -sfn ../Frameworks "$out/$label/Frameworks"; done < "$out/arms.txt"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -92,8 +93,8 @@ jobs:
           system_profiler SPDisplaysDataType | grep -E "Chipset|Resolution|Metal" || true
           sysctl -n hw.ncpu hw.memsize
           out="$RUNNER_TEMP/bins"
-          bins=(--bin "head=$out/head/cap-gpui")
-          [[ -d "$out/base" ]] && bins=(--bin "base=$out/base/cap-gpui" "${bins[@]}")
+          bins=()
+          while read -r label _; do bins+=(--bin "$label=$out/$label/cap-gpui"); done < "$out/arms.txt"
           python .github/playback-perf/bench.py "${bins[@]}" \
             --fixture "ref=$GITHUB_WORKSPACE/performance-fixtures/reference-recording.cap" \
             --out "$RUNNER_TEMP/bench" --rounds "$ROUNDS" --kinds "$KINDS" \
@@ -117,6 +118,8 @@ jobs:
 
   linux:
     name: Linux build and bench
+    needs: plan
+    if: needs.plan.outputs.linux != ''
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 170
     steps:
@@ -151,28 +154,15 @@ jobs:
         env:
           RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
       - name: Build
+        env:
+          ARMS: ${{ needs.plan.outputs.linux }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/bins"
-          release="$GITHUB_WORKSPACE/apps/desktop-gpui/target/release"
-          build() {
-            cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked \
-              --release --bin cap-gpui 2>&1 | grep -v "^ *Compiling" | tail -8
-            mkdir -p "$out/$1"
-            cp "$release/cap-gpui" "$out/$1/cap-gpui"
-          }
-          build head
-          if [[ -n "$BASE_REF" ]]; then
-            git diff --name-only --diff-filter=A "$BASE_REF" HEAD -- apps crates | xargs -I{} rm -f "{}"
-            git checkout "$BASE_REF" -- apps crates Cargo.toml Cargo.lock
-            git diff --stat HEAD -- apps crates | tail -3
-            build base
-            if cmp -s "$out/head/cap-gpui" "$out/base/cap-gpui"; then echo "::error::identical binaries"; exit 1; fi
-          fi
+          bash .github/playback-perf/build-arms.sh "$out" \
+            "$GITHUB_WORKSPACE/apps/desktop-gpui/target/release" ""
           mkdir -p "$out/libs"
           cp -a target/native-deps/lib/. "$out/libs/"
-          git rev-parse HEAD > "$out/head.sha"
-          ls -la "$out" "$out/head"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -182,8 +172,8 @@ jobs:
           python -m pip install -q psutil
           nproc; free -g | head -2
           out="$RUNNER_TEMP/bins"
-          bins=(--bin "head=$out/head/cap-gpui")
-          [[ -d "$out/base" ]] && bins=(--bin "base=$out/base/cap-gpui" "${bins[@]}")
+          bins=()
+          while read -r label _; do bins+=(--bin "$label=$out/$label/cap-gpui"); done < "$out/arms.txt"
           export VK_LOADER_LAYERS_DISABLE=VK_LAYER_MESA_device_select
           dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1080x24" \
             python .github/playback-perf/bench.py "${bins[@]}" \
@@ -210,6 +200,8 @@ jobs:
 
   windows-build:
     name: Windows build
+    needs: plan
+    if: needs.plan.outputs.win != ''
     runs-on: blacksmith-8vcpu-windows-2025
     timeout-minutes: 170
     env:
@@ -241,28 +233,12 @@ jobs:
           RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
       - name: Build
         shell: bash
+        env:
+          ARMS: ${{ needs.plan.outputs.win }}
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/bins"
-          release="$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release"
-          build() {
-            cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked \
-              --target "$TARGET" --release --bin cap-gpui 2>&1 | grep -v "^ *Compiling" | tail -8
-            mkdir -p "$out/$1"
-            cp "$release/cap-gpui.exe" "$out/$1/cap-gpui.exe"
-            cp "$GITHUB_WORKSPACE"/target/release/*.dll "$out/$1/" || true
-            find "$release" -maxdepth 1 -name '*.dll' -exec cp {} "$out/$1/" \;
-          }
-          build head
-          if [[ -n "$BASE_REF" ]]; then
-            git diff --name-only --diff-filter=A "$BASE_REF" HEAD -- apps crates | xargs -I{} rm -f "{}"
-            git checkout "$BASE_REF" -- apps crates Cargo.toml Cargo.lock
-            git diff --stat HEAD -- apps crates | tail -3
-            build base
-            if cmp -s "$out/head/cap-gpui.exe" "$out/base/cap-gpui.exe"; then echo "::error::identical binaries"; exit 1; fi
-          fi
-          git rev-parse HEAD > "$out/head.sha"
-          ls -la "$out" "$out/head"
+          bash .github/playback-perf/build-arms.sh "$RUNNER_TEMP/bins" \
+            "$GITHUB_WORKSPACE/apps/desktop-gpui/target/$TARGET/release" ".exe" --target "$TARGET"
       - uses: actions/upload-artifact@v4
         with:
           name: bins-windows
@@ -297,8 +273,8 @@ jobs:
           set -uo pipefail
           python -m pip install -q psutil
           powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | ForEach-Object { \$_.Name + ' ' + \$_.CurrentHorizontalResolution + 'x' + \$_.CurrentVerticalResolution }; (Get-CimInstance Win32_Processor).Name; (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors"
-          bins=(--bin "head=$GITHUB_WORKSPACE/bins/head/cap-gpui.exe")
-          [[ -d bins/base ]] && bins=(--bin "base=$GITHUB_WORKSPACE/bins/base/cap-gpui.exe" "${bins[@]}")
+          bins=()
+          while read -r label _; do bins+=(--bin "$label=$GITHUB_WORKSPACE/bins/$label/cap-gpui.exe"); done < bins/arms.txt
           python .github/playback-perf/bench.py "${bins[@]}" \
             --fixture "ref=$GITHUB_WORKSPACE/performance-fixtures/reference-recording.cap" \
             --out "$RUNNER_TEMP/bench" --rounds "$ROUNDS" --kinds "$KINDS" --timeout 900 \

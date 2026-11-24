@@ -60,7 +60,7 @@ KINDS = {
     "play": "playback",
     "edit": "scrub-fast,scrub-fine,zoom-drag,slider,pause",
 }
-PLAYBACK_SECS = 10.0
+PLAYBACK_SECS = float(os.environ.get("BENCH_PLAYBACK_SECS", "10"))
 SETTLE_SECS = 0.6
 
 
@@ -219,7 +219,8 @@ def run_once(binary: Path, fixture: Path, scratch: Path, kind: str, args, frame_
         match = INTERACTION.search(line)
         if match:
             fields = match.groupdict()
-            result["interactions"][fields.pop("label")] = {k: int(v) for k, v in fields.items()}
+            label = fields.pop("label")
+            result["interactions"][label] = {k: int(v) for k, v in fields.items()}
             continue
         match = MEMORY.search(line)
         if match:
