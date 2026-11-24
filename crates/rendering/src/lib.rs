@@ -9858,7 +9858,124 @@ fn probe_size(name: &str) -> Option<u64> {
     std::env::var(name).ok()?.parse().ok().filter(|size| *size > 0)
 }
 
+static PROBE_KEEP_GROUPS: std::sync::Mutex<Vec<wgpu::BindGroup>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn probe_dummy_bind_group(constants: &RenderVideoConstants, kind: &str) {
+    let device = &constants.device;
+    let mut entries = vec![
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+    ];
+    if kind != "nosampler" {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
+    }
+    if kind == "other" {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 3,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        });
+    }
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("probe layout"),
+        entries: &entries,
+    });
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("probe uniform"),
+        size: 1024,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let view = device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("probe bound texture"),
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+        .create_view(&Default::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    let mut bound = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::TextureView(&view),
+        },
+    ];
+    if kind != "nosampler" {
+        bound.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Sampler(&sampler),
+        });
+    }
+    if kind == "other" {
+        bound.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: wgpu::BindingResource::TextureView(&view),
+        });
+    }
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("probe bind group"),
+        layout: &layout,
+        entries: &bound,
+    });
+    tracing::warn!("PROBE dummy bind group kind={kind}");
+    PROBE_KEEP_GROUPS.lock().unwrap().push(group);
+    PROBE_KEEP_BUFFERS.lock().unwrap().push(buffer);
+}
+
 fn probe_dummies(constants: &RenderVideoConstants) {
+    static DUMMY_GROUPS_MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if let Ok(kind) = std::env::var("CAP_PROBE_DUMMY_BG") {
+        let limit = probe_size("CAP_PROBE_DUMMY_BG_FRAMES").unwrap_or(1);
+        if DUMMY_GROUPS_MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < limit {
+            probe_dummy_bind_group(constants, &kind);
+        }
+    }
     if let Some(size) = probe_size("CAP_PROBE_DUMMY_MAPBUF") {
         let buffer = constants.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("probe map-write buffer"),
