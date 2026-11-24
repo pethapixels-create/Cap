@@ -767,6 +767,9 @@ pub enum SimdLevel {
 impl SimdLevel {
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     pub fn detect() -> Self {
+        if std::env::var_os("CAP_PROBE_FORCE_SSE2").is_some() {
+            return SimdLevel::Sse2;
+        }
         if is_x86_feature_detected!("avx2") {
             SimdLevel::Avx2
         } else if is_x86_feature_detected!("sse2") {

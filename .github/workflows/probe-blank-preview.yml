@@ -76,16 +76,34 @@ jobs:
         shell: bash
         run: cargo build --locked -p cap
 
-      - name: Editor playback on the software adapter
+      - name: Editor playback, 1080p60 fixture
         shell: bash
         continue-on-error: true
         env:
-          CAP_PROBE_DUMP_DIR: ${{ github.workspace }}/probe-out
+          CAP_PROBE_DUMP_DIR: ${{ github.workspace }}/probe-out/a
+          CAP_PROBE_W: "1920"
+          CAP_PROBE_H: "1080"
+          CAP_PROBE_FPS: "60"
         run: |
-          mkdir -p probe-out
-          cargo run --locked -p cap -- --log-level debug selftest playback --duration 12 --skip-export --keep --json > probe-out/report.json 2> probe-out/playback.log || echo "exit $?"
-          cat probe-out/report.json || true
-          grep -a -E "PROBE|adapter|decoder|Decoder|WARN|ERROR" probe-out/playback.log | head -400 || true
+          mkdir -p probe-out/a
+          ./target/debug/cap.exe --log-level debug selftest playback --duration 8 --fps 60 --skip-export --keep --json > probe-out/a/report.json 2> probe-out/a/playback.log || echo "exit $?"
+          head -c 600 probe-out/a/report.json || true
+          grep -a -E "PROBE" probe-out/a/playback.log | head -60 || true
+
+      - name: Editor playback, 1080p60 fixture, SSE2 conversion
+        shell: bash
+        continue-on-error: true
+        env:
+          CAP_PROBE_DUMP_DIR: ${{ github.workspace }}/probe-out/b
+          CAP_PROBE_W: "1920"
+          CAP_PROBE_H: "1080"
+          CAP_PROBE_FPS: "60"
+          CAP_PROBE_FORCE_SSE2: "1"
+        run: |
+          mkdir -p probe-out/b
+          ./target/debug/cap.exe --log-level debug selftest playback --duration 8 --fps 60 --skip-export --keep --json > probe-out/b/report.json 2> probe-out/b/playback.log || echo "exit $?"
+          head -c 600 probe-out/b/report.json || true
+          grep -a -E "PROBE" probe-out/b/playback.log | head -60 || true
 
       - name: Upload probe output
         if: always()

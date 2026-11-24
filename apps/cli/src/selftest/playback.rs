@@ -642,9 +642,9 @@ mod fixture {
         // inside the gap window, like a static screen under VFR capture.
         let video_info = VideoInfo::from_raw(
             RawVideoFormat::Bgra,
-            FIXTURE_WIDTH,
-            FIXTURE_HEIGHT,
-            FIXTURE_FPS,
+            super::probe_dim("CAP_PROBE_W", FIXTURE_WIDTH),
+            super::probe_dim("CAP_PROBE_H", FIXTURE_HEIGHT),
+            super::probe_dim("CAP_PROBE_FPS", FIXTURE_FPS),
         );
         let (video_tx, video_rx) = flume::bounded::<FFmpegVideoFrame>(32);
         let video_emit = {
@@ -652,8 +652,8 @@ mod fixture {
             let total_secs = pattern.total_secs;
             let base = timestamps.instant();
             tokio::spawn(async move {
-                let period = 1.0 / f64::from(FIXTURE_FPS);
-                let frame_count = (total_secs * f64::from(FIXTURE_FPS)) as u64;
+                let period = 1.0 / f64::from(super::probe_dim("CAP_PROBE_FPS", FIXTURE_FPS));
+                let frame_count = (total_secs * f64::from(super::probe_dim("CAP_PROBE_FPS", FIXTURE_FPS))) as u64;
                 for k in 0..frame_count {
                     let t = k as f64 * period;
                     if in_video_gap(t) {
@@ -662,8 +662,8 @@ mod fixture {
                     tokio::time::sleep_until((base + Duration::from_secs_f64(t)).into()).await;
                     let mut frame = ffmpeg::frame::Video::new(
                         ffmpeg::format::Pixel::BGRA,
-                        FIXTURE_WIDTH,
-                        FIXTURE_HEIGHT,
+                        super::probe_dim("CAP_PROBE_W", FIXTURE_WIDTH),
+                        super::probe_dim("CAP_PROBE_H", FIXTURE_HEIGHT),
                     );
                     let shade = if in_flash(&events, t) { 0xFF } else { 0x00 };
                     frame.data_mut(0).fill(shade);
@@ -837,7 +837,7 @@ mod fixture {
             .signed_duration_since_secs(timestamps);
         let display_duration = finished_video
             .video_timestamp_span
-            .map(|(first, last)| (last - first).as_secs_f64() + 1.0 / f64::from(FIXTURE_FPS))
+            .map(|(first, last)| (last - first).as_secs_f64() + 1.0 / f64::from(super::probe_dim("CAP_PROBE_FPS", FIXTURE_FPS)))
             .ok_or("fixture video reported no timestamp span")?;
 
         let to_project_gap_summary =
@@ -851,7 +851,7 @@ mod fixture {
         let segment = MultipleSegment {
             display: VideoMeta {
                 path: RelativePathBuf::from("content/segments/segment-0/display.mp4"),
-                fps: FIXTURE_FPS,
+                fps: super::probe_dim("CAP_PROBE_FPS", FIXTURE_FPS),
                 start_time: Some(display_start),
                 device_id: None,
             },
@@ -1019,4 +1019,11 @@ fn probe_frame(output: &EditorFrameOutput) {
             }
         }
     }
+}
+
+fn probe_dim(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
 }
