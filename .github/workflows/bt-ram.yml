@@ -46,6 +46,9 @@ jobs:
           git show $BASE_SHA:apps/desktop-gpui/diarize/src/diarizer/tests.rs > apps/desktop-gpui/diarize/src/diarizer/tests.rs
           cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
           cp $d/cap-gpui $RUNNER_TEMP/bin/cap-gpui-base
+          mkdir -p $RUNNER_TEMP/Frameworks
+          ln -sfn "$GITHUB_WORKSPACE/target/Frameworks/Spacedrive.framework" $RUNNER_TEMP/Frameworks/Spacedrive.framework
+          ls $RUNNER_TEMP/Frameworks/Spacedrive.framework/Libraries/ | head -3
           md5 $RUNNER_TEMP/bin/*
       - run: brew install ffmpeg > /dev/null 2>&1 || true; ffmpeg -version | head -1
       - name: Audio devices, display and permissions
