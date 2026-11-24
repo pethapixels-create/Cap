@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: base, ref: 635ac81b36b1d32ab0f5a8bdf2bc7f6b1bd2c9d6 }
+          - { name: base, ref: 635ac81b36b2924998ee8055fb3102ddb8d32f77 }
           - { name: head, ref: 9af6989fa56869b3ad0cfe8e98a0af18dfd18d58 }
     runs-on: ubuntu-22.04
     timeout-minutes: 200
