@@ -1,0 +1,311 @@
+{
+ "you": "p0",
+ "remote": [
+  "p1",
+  "p2"
+ ],
+ "duration_ms": 235683,
+ "utterances": [
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 1000,
+   "end_ms": 4860,
+   "text": "SHE PUT HER HAND TO IT AND BECAME GHASTLY PALE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 5243,
+   "end_ms": 8133,
+   "text": "I WILL COME TO MORROW SAID MARGARET"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 8303,
+   "end_ms": 16263,
+   "text": "SHE SOUNDED TO BE SUCH A CAREFUL ECONOMICAL PERSON THAT I SHOULD LIKE ANY ONE OUT OF THE SAME FAMILY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 16903,
+   "end_ms": 19043,
+   "text": "WHAT HATH HAPPENED UNTO ME"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 19215,
+   "end_ms": 20995,
+   "text": "THOU HAST LOST THY GOAL"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 21790,
+   "end_ms": 23440,
+   "text": "THOU ART NOT PLEASING UNTO ME"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 23890,
+   "end_ms": 30040,
+   "text": "THEN THE TIGER BEGAN TO ROAR AND SAID THE JUDGMENT OF ALL IS AGAINST YOU O BRAHMAN"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 30682,
+   "end_ms": 35352,
+   "text": "I AM SURE AT ANY RATE SHE WOULD NOT LIKE STRANGERS TO KNOW ANYTHING ABOUT IT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 35721,
+   "end_ms": 38511,
+   "text": "NOUGHT WORSE THAN MANY OTHERS I RECKON"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 39667,
+   "end_ms": 52147,
+   "text": "I SHOULD HAVE GIVEN IT TO YOU LAST NIGHT AFTER DINNER ONLY IT HAPPENED TO BE A CREAM JUG AND YOU SEEMED ANNOYED AT HAVING SO MANY DUPLICATES SO I FELT RATHER AWKWARD ABOUT GIVING YOU ANOTHER"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 52929,
+   "end_ms": 55929,
+   "text": "THE FOREMAN DELIVERED HIS MESSAGE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 56240,
+   "end_ms": 68120,
+   "text": "OH WE HAVEN'T SHOWN YOU THE SILVER WEDDING PRESENTS SAID MISSUS PETER SUDDENLY AS THOUGH STRUCK BY A BRILLIANT IDEA FOR ENTERTAINING THE GUEST HERE THEY ALL ARE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 68409,
+   "end_ms": 77769,
+   "text": "THE JURY WISH TO ADD A RIDER DRAWING ATTENTION TO THE FACT THAT A BY ELECTION IS PENDING IN THE PARLIAMENTARY DIVISION OF NEMESIS ON HAND"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 78850,
+   "end_ms": 80440,
+   "text": "IN HEAVEN'S NAME WHY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 81024,
+   "end_ms": 84484,
+   "text": "THUS SPAKE ZARATHUSTRA TO HIS HEART AND RAN AWAY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 84706,
+   "end_ms": 88036,
+   "text": "BUT DOTH ZARATHUSTRA NEED TO BE FRIGHTENED BY HIS SHADOW"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 88722,
+   "end_ms": 92252,
+   "text": "WHY IT MIGHT HAVE BEEN IN THE WORKHOUSE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 92558,
+   "end_ms": 95978,
+   "text": "AT LAST SHE SAID IN A LOW VOICE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 97074,
+   "end_ms": 104154,
+   "text": "AS THEY TURNED UP INTO A SMALL COURT OPENING OUT OF A SQUALID STREET BESSY SAID"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 104357,
+   "end_ms": 107677,
+   "text": "NO ONE CAME FORWARDS TO HELP THE MOTHER AND THIS BOY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 108502,
+   "end_ms": 113952,
+   "text": "THEY ALSO ABSTAIN FROM ALL HEAVY THOUGHTS WHICH INFLATE THE HEART"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 114362,
+   "end_ms": 119982,
+   "text": "OH FATHER OF MERCY ANSWERED THE TIGER IN TRUTH THAT I WILL NOT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 120728,
+   "end_ms": 124128,
+   "text": "BESSY DO YOU WISH TO DIE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 124355,
+   "end_ms": 127485,
+   "text": "I BELIEVE WHAT I SEE AND NO MORE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 128325,
+   "end_ms": 134125,
+   "text": "WITH THAT NOTORIOUS FAILING OF HIS HE WAS NOT THE SORT OF PERSON ONE WANTED IN ONE'S HOUSE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 134562,
+   "end_ms": 137362,
+   "text": "A QUARTER PAST TEN HALF PAST"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 137791,
+   "end_ms": 141701,
+   "text": "I'LL TRY SAID THE HOME SECRETARY AND WENT TO THE TELEPHONE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 142817,
+   "end_ms": 150077,
+   "text": "BESIDES CYNICISM APART HIS BEING RICH WILL MAKE A DIFFERENCE IN THE WAY PEOPLE WILL LOOK AT HIS FAILING"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 150390,
+   "end_ms": 163450,
+   "text": "THE LOCAL TRADE UNIONISTS TOOK OFFENCE AT THE FACT OF CABINET MINISTERS HAVING PERSONALLY ACTED AS STRIKE BREAKERS AND EVEN THE RELEASE OF PLATTERBAFF FAILED TO PACIFY THEM"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 163771,
+   "end_ms": 168411,
+   "text": "THE TALK FLITTED NERVOUSLY AND HURRIEDLY FROM ONE IMPERSONAL TOPIC TO ANOTHER"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 168958,
+   "end_ms": 174168,
+   "text": "MARGARET WAS COLLECTING HER MOTHER'S WORKING MATERIALS AND PREPARING TO GO TO BED"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 174940,
+   "end_ms": 177140,
+   "text": "POLL OPENS IN FIVE MINUTES"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 178311,
+   "end_ms": 182341,
+   "text": "AND TALK TO MINE ANIMALS OF THE HAPPINESS OF ANIMALS"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 182770,
+   "end_ms": 186530,
+   "text": "ON WHAT MUST I GIVE JUDGMENT ASKED THE BANYAN TREE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 187436,
+   "end_ms": 189616,
+   "text": "THOU ALSO THOU ALSO"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 189945,
+   "end_ms": 194755,
+   "text": "LET THE TIGER EAT THE MAN FOR MEN ARE AN UNGRATEFUL RACE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 195696,
+   "end_ms": 198786,
+   "text": "CAN'T YOU GET A STRIKE PERMIT ASKED THE ORGANISER"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 199136,
+   "end_ms": 211566,
+   "text": "FROM HIS LATE SCHOOLDAYS ONWARD HE HAD BEEN POSSESSED BY AN ACUTE AND OBSTINATE FORM OF KLEPTOMANIA HE HAD THE ACQUISITIVE INSTINCT OF THE COLLECTOR WITHOUT ANY OF THE COLLECTOR'S DISCRIMINATION"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 211724,
+   "end_ms": 216784,
+   "text": "THE JURY FIND THE PRISONER GUILTY OF BLOWING UP THE ALBERT HALL"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 217576,
+   "end_ms": 225956,
+   "text": "WHEN HE SPOKE OF THE MECHANICAL POWERS HE EVIDENTLY LOOKED UPON THEM ONLY AS NEW WAYS OF EXTENDING TRADE AND MAKING MONEY"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 226987,
+   "end_ms": 229117,
+   "text": "HE EXCLAIMED WON'T GO"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 229544,
+   "end_ms": 231494,
+   "text": "THE CHIEF ORGANISER RANG OFF"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 231903,
+   "end_ms": 233683,
+   "text": "IT'S THE ONLY THING TO DO"
+  }
+ ]
+}

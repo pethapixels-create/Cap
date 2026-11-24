@@ -16,7 +16,7 @@ set -uo pipefail
 BIN=$1; WORK=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../.." && pwd)
-FIX=$ROOT/apps/desktop-gpui/tests/fixtures/meetings
+FIX=${CAP_MEETINGS_FIX:-$ROOT/apps/desktop-gpui/tests/fixtures/meetings}
 MODELS=${CAP_MEETINGS_MODELS:?models dir}
 mkdir -p "$WORK"
 epoch() { python3 -c 'import time;print(int(time.time()*1000))'; }
@@ -189,6 +189,7 @@ notes_window() { # opening the notes window again (its shortcut, then a meeting 
     "$R/states.txt" | tee "$R/check.txt"
 }
 
+if [ -n "${CAP_MEETINGS_ONLY_LOCAL:-}" ]; then meeting local "local"; exit 0; fi
 meeting local "local" "What did Ana say about the plan?"
 meeting cloud "cloud"
 indicator

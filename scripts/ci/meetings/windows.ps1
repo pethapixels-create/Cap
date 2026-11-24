@@ -14,7 +14,7 @@ param([string]$Bin, [string]$Work)
 $ErrorActionPreference = 'Continue'
 $Here = $PSScriptRoot
 $Root = (Resolve-Path "$Here\..\..\..").Path
-$Fix = "$Root\apps\desktop-gpui\tests\fixtures\meetings"
+$Fix = if ($env:CAP_MEETINGS_FIX) { $env:CAP_MEETINGS_FIX } else { "$Root\apps\desktop-gpui\tests\fixtures\meetings" }
 $Models = $env:CAP_MEETINGS_MODELS
 $py = (Get-Command python).Source
 New-Item -ItemType Directory -Force $Work | Out-Null
@@ -198,6 +198,7 @@ function NotesWindow {
   ($lines | ForEach-Object { "$(if ($_ -match 'notes=1 front=True') { 'PASS' } else { 'FAIL' }) $_" }) + @($(if ($ok) { 'ALL_PASS' } else { 'SOME_FAILED' })) | Tee-Object "$R\check.txt"
 }
 
+if ($env:CAP_MEETINGS_ONLY_LOCAL) { Meeting 'local' 'local' $null; exit 0 }
 Meeting 'local' 'local' 'What did Ana say about the plan?'
 Meeting 'cloud' 'cloud' $null
 Indicator
