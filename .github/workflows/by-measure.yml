@@ -5,7 +5,7 @@ name: Scratch BY lifecycle measurements
 
 on:
   push:
-    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m]
+    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m, ci/by-m1]
 
 permissions:
   contents: read
