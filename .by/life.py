@@ -80,19 +80,25 @@ def profile(r, notes, models=None, engine="default", stub_port=None):
         else:
             m = r / "home/.local/share/so.cap.desktop/transcription_models"
         m.mkdir(parents=True, exist_ok=True)
-        for f in Path(models).resolve().iterdir():
-            dst = m / f.name
-            if OS == "Windows":
-                if f.is_dir():
-                    subprocess.run(["cmd", "/c", "mklink", "/J", str(dst), str(f)], capture_output=True)
-                else:
-                    try:
-                        os.link(f, dst)
-                    except OSError:
-                        shutil.copy2(f, dst)
-            else:
-                dst.symlink_to(f)
+        link_tree(Path(models).resolve(), m)
     return r
+
+
+def link_tree(src, dst):
+    """Hardlinks every file under src into dst (real folders, never a shared folder link): the app
+    rewrites model files by writing new ones and renaming, so the shared originals stay as they are."""
+    for f in src.iterdir():
+        if f.name.endswith(".split") or f.name.endswith(".new"):
+            continue
+        d = dst / f.name
+        if f.is_dir():
+            d.mkdir(exist_ok=True)
+            link_tree(f, d)
+        else:
+            try:
+                os.link(f, d)
+            except OSError:
+                shutil.copy2(f, d)
 
 
 def app_env(pkg, r, extra=None):
@@ -596,6 +602,58 @@ def cmd_meeting(a):
     append(out, "meeting", row)
 
 
+def app_models(r):
+    base = ("home/Library/Application Support/so.cap.desktop" if OS == "Darwin" else
+            "home/AppData/Local/so.cap.desktop" if OS == "Windows" else "home/.local/share/so.cap.desktop")
+    return Path(r) / base / "transcription_models"
+
+
+def split_done(d):
+    e = d / "encoder-model.onnx"
+    return (d / "encoder-model.onnx.data").exists() and e.exists() and e.stat().st_size < 200 * 1048576
+
+
+def cmd_presplit(a):
+    """The one-time background split of a Parakeet encoder installed by an older Cap (what Notes does at
+    launch), measured; then the split files go in the shared models folder for every later run."""
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    src = Path(a.models).resolve() / "parakeet-best"
+    if OS == "Darwin" and platform.machine() == "x86_64":
+        append(out, "presplit", {"cmd": "presplit", "skipped": "no Parakeet on Intel Macs"})
+        return
+    if (src / "encoder-model.onnx").stat().st_size < 200 * 1048576:
+        append(out, "presplit", {"cmd": "presplit", "already": True})
+        return
+    r = profile(out / "runs" / "presplit", True, a.models)
+    dst = app_models(r) / "parakeet-best"
+    p, t0 = spawn(a.pkg, r)
+    smp = Sampler(p.pid, 0.5); smp.start()
+    done = None
+    for _ in range(int(a.timeout * 4)):
+        if p.poll() is not None:
+            break
+        if split_done(dst):
+            done = time.time()
+            break
+        time.sleep(0.25)
+    time.sleep(3)
+    smp.stop.set(); smp.join()
+    kill(p)
+    rows = smp.rows
+    mb = lambda x: x / 1048576
+    row = {"cmd": "presplit", "split_s": round(done - t0, 1) if done else None,
+           "rss_mb_max": mb(max(x["rss"] for x in rows)) if rows else None,
+           "footprint_mb_max": mb(max(x["footprint"] for x in rows)) if rows else None,
+           "cpu_s": rows[-1]["cpu"] if rows else None,
+           "disk_w_mb": mb(rows[-1]["disk_w"] - rows[0]["disk_w"]) if rows else None}
+    append(out, "presplit", row)
+    if done:
+        for name in ("encoder-model.onnx.data", "encoder-model.onnx"):
+            tmp = src / (name + ".new")
+            shutil.copy2(dst / name, tmp)
+            os.replace(tmp, src / name)
+
+
 def corpus(work, minutes=180):
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
     t, n = work / "long.txt", work / "long.md"
@@ -652,7 +710,7 @@ def cmd_ui(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("launch", "idle", "meeting", "ui"):
+    for name in ("launch", "idle", "meeting", "ui", "presplit"):
         s = sub.add_parser(name)
         s.add_argument("--out", required=True)
         s.add_argument("--models")
@@ -670,8 +728,10 @@ def main():
     u = sub.choices["ui"]
     u.add_argument("--pkg", required=True); u.add_argument("--runs", type=int, default=3)
     u.add_argument("--seed", type=int, default=500)
+    ps = sub.choices["presplit"]
+    ps.add_argument("--pkg", required=True); ps.add_argument("--timeout", type=int, default=900)
     a = ap.parse_args()
-    {"launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
+    {"presplit": cmd_presplit, "launch": cmd_launch, "idle": cmd_idle, "meeting": cmd_meeting, "ui": cmd_ui}[a.cmd](a)
 
 
 if __name__ == "__main__":

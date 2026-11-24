@@ -1,4 +1,4 @@
-linux-mid launch idle ui meeting
-mac-arm-8gb launch idle ui meeting
-mac-intel launch idle ui meeting meeting-local
-windows-mid launch idle ui meeting
+linux-mid presplit launch idle ui meeting
+mac-arm-8gb presplit launch idle ui meeting
+mac-intel presplit launch idle ui meeting meeting-local
+windows-mid presplit launch idle ui meeting

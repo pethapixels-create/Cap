@@ -147,6 +147,7 @@ jobs:
           for s in $STEPS; do
             echo "::group::$s"
             case $s in
+              presplit) $PY life.py presplit --out out --models models --pkg ship-head --timeout 900 ;;
               launch) $PY life.py launch --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 7 ;;
               idle) $PY life.py idle --out out --models models --arm pre=ship-pre --arm head=ship-head --arm head-notes=ship-head:notes --rounds 2 ;;
               ui) $PY life.py ui --out out --pkg hx-head --runs 3 ;;
