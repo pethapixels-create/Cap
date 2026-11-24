@@ -11,9 +11,9 @@ permissions:
 # Each list is "label=commit label=commit": every arm is built in one tree and
 # benched interleaved. An empty list skips that platform.
 env:
-  ARMS_MAC: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=e7ad384788588176130074d2bb58a602bd4d1562"
-  ARMS_LINUX: "head=HEAD"
-  ARMS_WIN: ""
+  ARMS_MAC: ""
+  ARMS_LINUX: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=c67da6d8bf5ac17091ae73a2408135075b204dbc"
+  ARMS_WIN: "base=09bdc687c1adc0284916d635c8ad8eca9a46ed59 head=c67da6d8bf5ac17091ae73a2408135075b204dbc"
   ROUNDS: "5"
   KINDS: "play,edit"
   CARGO_PROFILE_RELEASE_LTO: "false"
