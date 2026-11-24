@@ -1,0 +1,36 @@
+name: cb-cli
+on:
+  push:
+    branches: ["ci/cb-cli*"]
+jobs:
+  cli:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-desktop-deps
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Run setup
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      - name: Stage PipeWire headers
+        run: |
+          dir="$(bash scripts/stage-pipewire-headers.sh "$RUNNER_TEMP/pipewire-headers")"
+          echo "PKG_CONFIG_PATH=$dir" >> "$GITHUB_ENV"
+      - name: Build cap-cli
+        run: |
+          set -euo pipefail
+          grep -n '^name' apps/cli/Cargo.toml
+          cargo build --locked --release -p "$(awk -F'"' '/^name/{print $2; exit}' apps/cli/Cargo.toml)"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp target/release/cap-cli "$RUNNER_TEMP/out/" || cp target/release/cap "$RUNNER_TEMP/out/cap-cli"
+          git rev-parse HEAD > "$RUNNER_TEMP/out/REV"
+          objdump -T "$RUNNER_TEMP/out/cap-cli" | grep -oE 'GLIBC_[0-9.]+' | sort -V -u | tail -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cb-cli
+          path: ${{ runner.temp }}/out
+          retention-days: 3
