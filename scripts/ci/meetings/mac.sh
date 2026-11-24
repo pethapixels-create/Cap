@@ -13,7 +13,7 @@ ffmpeg -v error -y -i "$FIX/others.opus" -ac 2 -ar 48000 "$R/others.wav"
 DUR=$(python3 -c "import json;print(json.load(open('$FIX/truth.json'))['duration_ms']//1000)")
 echo '{"enabled": true, "setupCompleted": true, "transcription": {"engine": "local", "live": true}}' > "$R/data/meetings/settings.json"
 echo "{\"general_settings\":{\"hasCompletedOnboarding\":true,\"hasCompletedStartup\":true,\"enableNotifications\":false,\"enableTelemetry\":false,\"recordingCountdown\":0,\"serverUrl\":\"http://127.0.0.1:8899\"},\"auth\":{\"secret\":{\"api_key\":\"ci-test-key\"},\"user_id\":\"citestuser0001\",\"plan\":{\"upgraded\":true,\"manual\":false,\"last_checked\":$(date +%s)},\"organizations\":[]}}" > "$R/data/store"
-echo "3000 $R/mic.f32" > "$R/mic_script.txt"
+echo "2000 $R/mic.f32" > "$R/mic_script.txt"
 python3 "$HERE/stub_server.py" 8899 "$R/stub.jsonl" & STUB=$!
 sleep 1
 env HOME="$R/home" CAP_GPUI_APP_DATA_DIR="$R/data" CAP_GPUI_LOG_DIR="$R/logs" CAP_GPUI_NO_TRAY=1 \
