@@ -39,7 +39,7 @@ def now_ms():
 
 
 def exe(pkg):
-    return Path(pkg) / "bin" / ("cap-gpui.exe" if OS == "Windows" else "cap-gpui")
+    return Path(pkg).resolve() / "bin" / ("cap-gpui.exe" if OS == "Windows" else "cap-gpui")
 
 
 def write_json(path, obj):
@@ -55,7 +55,7 @@ def append(out, name, row):
 
 # ---------------------------------------------------------------- profile + spawn
 def profile(r, notes, models=None, engine="default", stub_port=None):
-    r = Path(r)
+    r = Path(r).resolve()
     for d in ("home", "data/meetings", "logs", "rec"):
         (r / d).mkdir(parents=True, exist_ok=True)
     gs = {"hasCompletedOnboarding": True, "hasCompletedStartup": True, "enableNotifications": False,
@@ -80,7 +80,7 @@ def profile(r, notes, models=None, engine="default", stub_port=None):
         else:
             m = r / "home/.local/share/so.cap.desktop/transcription_models"
         m.mkdir(parents=True, exist_ok=True)
-        for f in Path(models).iterdir():
+        for f in Path(models).resolve().iterdir():
             dst = m / f.name
             if OS == "Windows":
                 if f.is_dir():
@@ -96,7 +96,7 @@ def profile(r, notes, models=None, engine="default", stub_port=None):
 
 
 def app_env(pkg, r, extra=None):
-    pkg, r = Path(pkg), Path(r)
+    pkg, r = Path(pkg).resolve(), Path(r).resolve()
     env = dict(os.environ)
     env.update({"CAP_GPUI_APP_DATA_DIR": str(r / "data"), "CAP_GPUI_LOG_DIR": str(r / "logs"),
                 "CAP_GPUI_RECORDINGS_DIR": str(r / "rec"), "CAP_GPUI_NO_TRAY": "1", "RUST_LOG": LOG_FILTER})
@@ -514,7 +514,7 @@ def frame_stats(log):
 def cmd_meeting(a):
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     loops = max(1, round(a.mins * 60_000 / 120_000))
-    mic, sysw, dur = build_fixture(a.fix, out / "fixture", loops)
+    mic, sysw, dur = build_fixture(Path(a.fix).resolve(), out.resolve() / "fixture", loops)
     name = a.name or f"meeting-{a.engine}-{a.mins}m"
     r = profile(out / "runs" / name, True, a.models, a.engine, stub_port=8899)
     script = r / "mic_script.txt"
@@ -606,7 +606,7 @@ def corpus(work, minutes=180):
 
 def cmd_ui(a):
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    t, n = corpus(out / "corpus")
+    t, n = corpus(out.resolve() / "corpus")
     r = profile(out / "runs" / "ui", True)
     for run in range(a.runs):
         rr = out / "runs" / f"ui-{run}"; rr.mkdir(parents=True, exist_ok=True)

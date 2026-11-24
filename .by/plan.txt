@@ -1,3 +1,4 @@
 linux-mid smoke
 mac-arm-8gb smoke
 mac-intel smoke
+windows-mid smoke

@@ -36,12 +36,13 @@ jobs:
           - box: mac-intel
             runner: macos-15-intel
             os: mac-x64
-    env:
-      W: ${{ github.workspace }}/../by
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Work dir
+        shell: bash
+        run: echo "W=$RUNNER_TEMP/by" >> "$GITHUB_ENV"
       - name: Plan
         id: plan
         shell: bash
@@ -167,11 +168,11 @@ jobs:
         with:
           name: res-${{ matrix.box }}
           path: |
-            ${{ env.W }}/out/*.jsonl
-            ${{ env.W }}/out/runs/*/app.log
-            ${{ env.W }}/out/runs/*/app.out
-            ${{ env.W }}/out/runs/*/summary.json
-            ${{ env.W }}/out/runs/*/samples.jsonl
-            ${{ env.W }}/out/runs/*/powermetrics.txt
-            ${{ env.W }}/out/runs/*/stub.jsonl
+            ${{ runner.temp }}/by/out/*.jsonl
+            ${{ runner.temp }}/by/out/runs/*/app.log
+            ${{ runner.temp }}/by/out/runs/*/app.out
+            ${{ runner.temp }}/by/out/runs/*/summary.json
+            ${{ runner.temp }}/by/out/runs/*/samples.jsonl
+            ${{ runner.temp }}/by/out/runs/*/powermetrics.txt
+            ${{ runner.temp }}/by/out/runs/*/stub.jsonl
           retention-days: 5
