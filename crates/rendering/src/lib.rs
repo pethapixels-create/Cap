@@ -9248,6 +9248,13 @@ impl RendererLayers {
         if probe_switch("CAP_PROBE_FLUSH") {
             constants.queue.submit(std::iter::empty());
         }
+        if probe_switch("CAP_PROBE_FLUSH_WAIT") {
+            let submission = constants.queue.submit(std::iter::empty());
+            let _ = constants
+                .device
+                .poll(wgpu::PollType::WaitForSubmissionIndex(submission));
+        }
+        probe_dummies(constants);
 
         let start = Instant::now();
         if !probe_switch("CAP_PROBE_CURSOR_FIRST") {
@@ -9843,6 +9850,52 @@ impl LayerParts {
 /// Because consecutive layers share one pass, a layer that changes dynamic
 /// pass state (scissor, viewport, blend constant, stencil reference) must
 /// restore it before returning.
+static PROBE_KEEP_BUFFERS: std::sync::Mutex<Vec<wgpu::Buffer>> = std::sync::Mutex::new(Vec::new());
+static PROBE_KEEP_TEXTURES: std::sync::Mutex<Vec<wgpu::Texture>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn probe_size(name: &str) -> Option<u64> {
+    std::env::var(name).ok()?.parse().ok().filter(|size| *size > 0)
+}
+
+fn probe_dummies(constants: &RenderVideoConstants) {
+    if let Some(size) = probe_size("CAP_PROBE_DUMMY_MAPBUF") {
+        let buffer = constants.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("probe map-write buffer"),
+            size,
+            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        PROBE_KEEP_BUFFERS.lock().unwrap().push(buffer);
+    }
+    if let Some(size) = probe_size("CAP_PROBE_DUMMY_GPUBUF") {
+        let buffer = constants.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("probe gpu buffer"),
+            size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        PROBE_KEEP_BUFFERS.lock().unwrap().push(buffer);
+    }
+    if let Some(size) = probe_size("CAP_PROBE_DUMMY_TEX") {
+        let texture = constants.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("probe texture"),
+            size: wgpu::Extent3d {
+                width: size as u32,
+                height: size as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        PROBE_KEEP_TEXTURES.lock().unwrap().push(texture);
+    }
+}
+
 pub(crate) fn probe_switch(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| value != "0")
 }

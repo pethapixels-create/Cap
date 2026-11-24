@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: p53b }
+          - { label: p54c }
     runs-on: blacksmith-8vcpu-windows-2025
     timeout-minutes: 120
     steps:
