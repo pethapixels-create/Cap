@@ -14,8 +14,8 @@ env:
   ARMS_MAC: ""
   ARMS_LINUX: ""
   ARMS_WIN: "base=9a39305f8a264d76ba75f2f8291f45b5dfd62adf head=0107fb2ff61306ac8d8683bddba217afbc3d9773"
-  ROUNDS: "5"
-  KINDS: "play,edit"
+  ROUNDS: "12"
+  KINDS: "edit"
   CARGO_PROFILE_RELEASE_LTO: "false"
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
