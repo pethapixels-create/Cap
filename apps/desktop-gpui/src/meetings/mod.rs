@@ -2893,6 +2893,8 @@ impl Meetings {
             since_sound: stats.system.map(|s| since(s.sound_at_ms)),
             remote_speaking,
             gave_up: stats.tap.is_some_and(|t| t.gave_up),
+            always_delivers: cfg!(target_os = "macos")
+                && system_audio_grant() == health::AudioGrant::Granted,
         };
         let verdict = recording.watchdog.check(now, view);
         if verdict.restart {

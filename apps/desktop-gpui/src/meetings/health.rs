@@ -246,6 +246,10 @@ pub struct TapView {
     pub remote_speaking: bool,
     /// The capture gave up rebuilding itself.
     pub gave_up: bool,
+    /// A working capture hands over audio the whole time, zeros when
+    /// nothing plays (a macOS tap with its grant; a Windows loopback goes
+    /// quiet instead), so no audio at all means it stopped.
+    pub always_delivers: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -290,8 +294,11 @@ impl Watchdog {
         let (Some(since_real), Some(since_sound)) = (view.since_real, view.since_sound) else {
             return Verdict::default();
         };
-        // A capture that gave up is dead whether or not a call is on.
-        if !view.call && !view.gave_up {
+        // A capture that gave up, or one that stopped handing over audio
+        // where a working one always does, is dead whether or not a call is
+        // on.
+        let stopped = view.always_delivers && since_real >= NO_AUDIO_RESTART;
+        if !view.call && !view.gave_up && !stopped {
             return Verdict::default();
         }
         if !view.call {
@@ -548,6 +555,19 @@ mod tests {
         let dead = TapView { call: false, gave_up: true, ..calling(30, 30) };
         assert_eq!(w.check(t0, dead), Verdict { not_hearing: false, restart: true });
         assert!(!w.check(t0 + secs(5), dead).restart, "not again at once");
+    }
+
+    #[test]
+    fn a_capture_that_always_delivers_restarts_when_audio_stops_even_without_a_call() {
+        let t0 = Instant::now();
+        let mut w = Watchdog::default();
+        let tap = |real| TapView { call: false, always_delivers: true, ..calling(real, real) };
+        assert_eq!(w.check(t0, tap(3)), Verdict::default(), "a moment's gap is fine");
+        assert_eq!(w.check(t0, tap(6)), Verdict { not_hearing: false, restart: true });
+        assert!(!w.check(t0 + secs(5), tap(11)).restart, "the next restart waits 10 s");
+        assert!(w.check(t0 + secs(10), tap(16)).restart);
+        let quiet = TapView { call: false, always_delivers: true, ..calling(0, 600) };
+        assert_eq!(w.check(t0 + secs(600), quiet), Verdict::default(), "zeros arriving are a quiet room");
     }
 
     #[test]
