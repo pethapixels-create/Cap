@@ -1,0 +1,532 @@
+name: cb-pkg
+on:
+  push:
+    branches: ["ci/cb-pkg*"]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            arch: x86_64
+    env:
+      CAP_BUNDLE: apps/desktop-gpui/target/${{ matrix.settings.target }}/release/bundle
+    runs-on: ${{ matrix.settings.runner }}
+    timeout-minutes: 240
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        uses: ./.github/actions/install-desktop-deps
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Host facts
+        run: |
+          head -3 /etc/os-release; ldd --version | head -1; gcc --version | head -1
+
+
+      # Nightly and promoted builds carry a version that differs from the
+      # committed Cargo.toml; Tauri reads the app version from package.version,
+      # and the GPUI build syncs its own manifest from this one.
+      # Runs after the cache step so the stamped version never lands in the
+      # cache key's Cargo.toml hash (a fresh nightly version each night would
+      # otherwise write a fresh multi-GB cache entry per target per night).
+      - name: Stamp build version
+        shell: bash
+        env:
+          BUILD_VERSION: 0.6.99
+        # promote-nightly can rebuild a commit from before the Tauri app was
+        # removed, where apps/desktop/src-tauri/Cargo.toml was the version
+        # source, so that manifest is stamped too when it exists.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = process.env.BUILD_VERSION;
+            const manifests = ["apps/desktop-gpui/Cargo.toml", "apps/desktop/src-tauri/Cargo.toml"];
+            for (const path of manifests.filter((path, index) => index === 0 || fs.existsSync(path))) {
+              let toml = fs.readFileSync(path, "utf8");
+              const re = /^version = ".*"$/m;
+              if (!re.test(toml)) {
+                console.error("package.version line not found in " + path);
+                process.exit(1);
+              }
+              toml = toml.replace(re, "version = \"" + version + "\"");
+              fs.writeFileSync(path, toml);
+              console.log("Stamped " + path + " with " + version);
+            }
+          '
+          node scripts/sync-desktop-versions.mjs
+
+      - uses: ./.github/actions/setup-js
+      - name: Create .env file in root
+        shell: bash
+        run: |
+          {
+            echo "appVersion=0.6.99"
+            echo "VITE_ENVIRONMENT=production"
+            echo "NEXT_PUBLIC_WEB_URL=https://cap.so"
+            echo "NEXTAUTH_URL=https://cap.so"
+            echo "VITE_SERVER_URL=https://cap.so"
+            echo "RUST_TARGET_TRIPLE=${{ matrix.settings.target }}"
+          } >> .env
+
+
+      - name: Run cap-setup
+        shell: bash
+        run: bun run cap-setup
+        env:
+          RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
+          APPLE_SIGNING_IDENTITY: ''
+          APPLE_KEYCHAIN: ''
+
+      # Ubuntu 22.04's PipeWire headers are too old for the Rust bindings, so
+      # Cap compiles against Ubuntu 24.04's (the ones it has always built
+      # with) and links the build image's own libpipewire.
+      - name: Stage PipeWire headers (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$(bash scripts/stage-pipewire-headers.sh "$RUNNER_TEMP/pipewire-headers")"
+          echo "PKG_CONFIG_PATH=$dir${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      # The sidecars ship inside Cap, which is itself stripped, and nothing
+      # symbolicates them, so their symbol tables are dead weight in every
+      # download.
+      - name: Build desktop binaries
+        shell: bash
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: "0"
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: ./scripts/build-desktop-binaries.sh ${{ matrix.settings.target }}
+
+      # The final link used to peak well above the 16GB stock Linux runner and
+      # get OOM-killed ("runner received a shutdown signal") under fat LTO +
+      # full debuginfo. The release profile is thin LTO + line tables now, but
+      # the headroom is cheap, so keep it. The runner already ships an active
+      # /swapfile (resizing it fails with "Text file busy"), so add a large
+      # swapfile on the roomy /mnt disk on top of the existing swap.
+      # macOS runs on xlarge runners and is unaffected.
+      - name: Increase swap space (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo swapoff /mnt/swapfile 2>/dev/null || true
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          swapon --show
+          free -h
+
+      # The AppImage's fallback libva (for hosts without one) is Ubuntu's 2.23
+      # rebuilt on Ubuntu 22.04, so it needs no newer glibc than Cap. It builds
+      # in a container so its build dependencies never reach Cap's build.
+      - name: Build fallback libva (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/fallback-libva"
+          mkdir -p "$out"
+          docker run --rm \
+            --volume "${{ github.workspace }}/scripts:/scripts:ro" \
+            --volume "$out:/out" \
+            ubuntu:22.04@sha256:b682e31336cc8e0a73ed91ab32b7a95e32591c5ff09994490a20accf9b3600f9 \
+            bash -c 'set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get -o Acquire::Retries=4 update -qq
+              apt-get -o Acquire::Retries=4 install -y -qq --no-install-recommends \
+                build-essential ca-certificates curl dpkg-dev debhelper meson ninja-build pkg-config \
+                libdrm-dev libgl-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-dri3-dev \
+                libxcb1-dev libxext-dev libxfixes-dev > /dev/null
+              dir="$(bash /scripts/build-fallback-libva.sh /tmp/libva | tail -n1)"
+              cp -a "$dir"/libva.so.2* "$dir"/libva-drm.so.2* /out/'
+          test -e "$out/libva.so.2"
+          test -e "$out/libva-drm.so.2"
+          echo "CAP_APPIMAGE_LIBVA_DIR=$out" >> "$GITHUB_ENV"
+      - name: Ephemeral updater key
+        shell: bash
+        run: |
+          cd apps/desktop-gpui
+          bun run tauri signer generate --ci -p "" -w "$RUNNER_TEMP/cb.key" >/dev/null
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
+            cat "$RUNNER_TEMP/cb.key"
+            echo
+            echo "KEYEOF"
+          } >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+
+      - name: Build Cap
+        shell: bash
+        run: node scripts/build-linux-packages.mjs "$TARGET" --verbose
+        env:
+          TARGET: ${{ matrix.settings.target }}
+          CI: false
+          LD_LIBRARY_PATH: ${{ format('{0}/apps/desktop-gpui/target/{1}/release:{0}/target/native-deps/lib', github.workspace, matrix.settings.target) }}
+          RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
+
+
+      # Guards against the Linux packaging regressions:
+      #   1. FFmpeg soname mismatch: every libav*/libsw* a binary lists as
+      #      NEEDED must be bundled under /usr/lib/cap/ with the exact same soname.
+      #      The bundled libs come from native-deps (FFmpeg 7); if a binary
+      #      linked system FFmpeg 6 the loader fails at launch.
+      #   2. Undeclared runtime dependency: a system lib a binary NEEDs that is
+      #      neither bundled nor part of the declared stack must appear in the
+      #      .deb Depends, or the loader aborts at launch. This is the
+      #      libpipewire-0.3.so.0 crash that shipped in 0.5.2.
+      - name: Verify Linux deb contents
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEB="$(find "$CAP_BUNDLE/deb" -name '*.deb' | head -n1)"
+          if [[ -z "$DEB" ]]; then echo "::error::No .deb produced"; exit 1; fi
+          if [[ ! -s "$DEB.sig" ]]; then echo "::error::No .deb updater signature produced next to $DEB"; exit 1; fi
+          if [[ "$(dpkg-deb -f "$DEB" Package)" != "cap" ]]; then
+            echo "::error::The Cap deb must keep the 'cap' package name so existing installs upgrade into it."
+            exit 1
+          fi
+          echo "Inspecting $DEB"
+          WORK="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$WORK"
+
+          EXECUTABLES=()
+          for binary in Cap cap-muxer cap-cli; do
+            executable="$WORK/usr/bin/$binary"
+            if [[ ! -x "$executable" ]]; then
+              echo "::error::Bundled executable missing or not executable: /usr/bin/$binary"
+              exit 1
+            fi
+            EXECUTABLES+=("$executable")
+          done
+          for binary in cap-gpui cap-exporter; do
+            if [[ -e "$WORK/usr/bin/$binary" ]]; then
+              echo "::error::The Cap deb still ships /usr/bin/$binary"
+              exit 1
+            fi
+          done
+
+          CAP_RPATH="$(objdump -p "$WORK/usr/bin/Cap" | awk '/RPATH|RUNPATH/{print $2}')"
+          if [[ "$CAP_RPATH" != *"\$ORIGIN/../lib/cap"* ]]; then
+            echo "::error::The bundled Cap executable cannot resolve shared libraries from /usr/lib/cap"
+            exit 1
+          fi
+
+          # (1) every FFmpeg soname the binaries NEED is bundled
+          NEEDED="$(for executable in "${EXECUTABLES[@]}"; do objdump -p "$executable"; done | awk '/NEEDED/{print $2}' | grep -E '^lib(av|sw|postproc)' | sort -u || true)"
+          echo "Binaries NEED FFmpeg sonames:"; echo "${NEEDED:-(none)}"
+          echo "Bundled FFmpeg libs:"; ls -1 "$WORK/usr/lib/cap" 2>/dev/null || true
+          MISSING=0
+          for so in $NEEDED; do
+            if [[ ! -f "$WORK/usr/lib/cap/$so" ]]; then
+              echo "::error::A binary NEEDs $so but it is not bundled under /usr/lib/cap/"
+              MISSING=1
+            fi
+          done
+          if [[ "$MISSING" -ne 0 ]]; then
+            echo "::error::FFmpeg soname mismatch between binaries and bundled libs."
+            exit 1
+          fi
+          echo "FFmpeg soname bundle OK"
+
+          # (2) runtime libs that are NOT bundled must be declared in the .deb
+          # Depends, or the dynamic loader aborts at launch.
+          DEPENDS="$(dpkg-deb -f "$DEB" Depends || true)"
+          echo "Declared Depends: ${DEPENDS:-(none)}"
+          if ! echo "$DEPENDS" | grep -Eq '(^|,[[:space:]]*)pulseaudio-utils([[:space:](,]|$)'; then
+            echo "::error::Linux system audio requires pulseaudio-utils (pactl) in .deb Depends."
+            exit 1
+          fi
+          if echo "$DEPENDS" | grep -Eq 'webkit2gtk|libgtk-3|appindicator'; then
+            echo "::error::The Cap deb must not depend on the Tauri webview stack."
+            exit 1
+          fi
+          NEEDED_ALL="$(for executable in "${EXECUTABLES[@]}"; do objdump -p "$executable"; done | awk '/NEEDED/{print $2}' | sort -u)"
+          # soname -> a Depends token that satisfies it. The alsa token is a
+          # substring so it matches both libasound2 and libasound2t64.
+          declare -A SONAME_DEP=(
+            [libpipewire-0.3.so.0]="libpipewire-0.3-0"
+            [libasound.so.2]="libasound2"
+            [libxkbcommon.so.0]="libxkbcommon0"
+            [libxkbcommon-x11.so.0]="libxkbcommon-x11-0"
+            [libX11.so.6]="libx11-6"
+            [libssl.so.3]="libssl3"
+          )
+          DEP_MISSING=0
+          for so in "${!SONAME_DEP[@]}"; do
+            if echo "$NEEDED_ALL" | grep -qx "$so"; then
+              tok="${SONAME_DEP[$so]}"
+              if ! echo "$DEPENDS" | grep -q "$tok"; then
+                echo "::error::A binary NEEDs $so but '$tok' is not declared in .deb Depends (add it to apps/desktop-gpui/tauri.conf.json bundle.linux.deb.depends)."
+                DEP_MISSING=1
+              else
+                echo "Runtime dep OK: $so -> $tok"
+              fi
+            fi
+          done
+          if [[ "$DEP_MISSING" -ne 0 ]]; then
+            echo "::error::Undeclared runtime dependency in .deb Depends."
+            exit 1
+          fi
+          echo "Runtime dependency declarations OK"
+
+      - name: Verify Linux RPM and AppImage contents
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        env:
+          CAP_RELEASE_VERSION: "0.6.99"
+        run: |
+          set -euo pipefail
+          BUNDLE="$GITHUB_WORKSPACE/$CAP_BUNDLE"
+          RPM="$BUNDLE/rpm/Cap-$CAP_RELEASE_VERSION-1.x86_64.rpm"
+          APPIMAGE="$BUNDLE/appimage/Cap_${CAP_RELEASE_VERSION}_amd64.AppImage"
+          test -s "$APPIMAGE.sig"
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          mkdir "$WORK/rpm" "$WORK/appimage"
+          (cd "$WORK/appimage" && "$APPIMAGE" --appimage-extract > /dev/null)
+          APPROOT="$WORK/appimage/squashfs-root"
+          verify_root() {
+            local root="$1"
+            shift
+            for binary in "$@"; do
+              test -x "$root/usr/bin/$binary"
+              while read -r soname; do
+                test -f "$root/usr/lib/cap/$soname"
+              done < <(objdump -p "$root/usr/bin/$binary" | awk '/NEEDED/{print $2}' | grep -E '^lib(av|sw|postproc)' || true)
+            done
+            test ! -e "$root/usr/bin/cap-gpui"
+          }
+          verify_root "$APPROOT" Cap cap-muxer cap-cli
+          # Every ELF in the AppImage and the rpm, bundled libraries included,
+          # must load on the glibc the deb declares, or Cap cannot start there.
+          GLIBC_FLOOR="$(dpkg-deb -f "$BUNDLE"/deb/*.deb Depends | grep -oP 'libc6 \(>= \K[0-9.]+')"
+          test -n "$GLIBC_FLOOR"
+          verify_glibc_floor() {
+            local root="$1" file needed over=0
+            while IFS= read -r -d '' file; do
+              [[ "$(head -c4 "$file" | od -An -tx1 | tr -d ' ')" == 7f454c46 ]] || continue
+              needed="$(readelf --wide --version-info "$file" | sed -n '/Version needs section/,$p' | { grep -oP 'Name: GLIBC_\K[0-9.]+' || true; } | sort -V | tail -n1)"
+              if [[ -n "$needed" && "$(printf '%s\n%s\n' "$needed" "$GLIBC_FLOOR" | sort -V | tail -n1)" != "$GLIBC_FLOOR" ]]; then
+                echo "::error::${file#"$root"/} needs GLIBC_$needed, above the declared libc6 (>= $GLIBC_FLOOR)"
+                over=1
+              fi
+            done < <(find "$root" -type f -print0)
+            return "$over"
+          }
+          verify_glibc_floor "$APPROOT"
+          if [[ -n "$(find "$APPROOT" \( -name 'libwebkit2gtk-*' -o -name 'libgtk-3.so*' -o -name 'WebKitWebProcess' \) -print -quit)" || -e "$APPROOT/apprun-hooks" ]]; then
+            echo "::error::The Cap AppImage still bundles the Tauri webview runtime"
+            exit 1
+          fi
+          if [[ "$CAP_RELEASE_VERSION" != *-* ]]; then
+            test -s "$RPM"
+            test "$(rpm -qp --queryformat '%{VERSION}-%{RELEASE}' "$RPM")" = "$CAP_RELEASE_VERSION-1"
+            rpm -Kv "$RPM"
+            if rpm -qpR "$RPM" | grep -Eq 'webkit2gtk|libgtk-3|gtk3'; then
+              echo "::error::The Cap RPM must not require the Tauri webview stack."
+              exit 1
+            fi
+            bsdtar -xf "$RPM" -C "$WORK/rpm"
+            test "$(cat "$WORK/rpm/usr/lib/cap/package-format")" = rpm
+            verify_root "$WORK/rpm" Cap cap-muxer cap-cli
+            verify_glibc_floor "$WORK/rpm"
+          fi
+          test "$(cat "$APPROOT/usr/lib/cap/package-format")" = appimage
+          test -x "$APPROOT/usr/bin/pactl"
+          test -s "$APPROOT/usr/lib/alsa-lib/libasound_module_pcm_pulse.so"
+          test -s "$APPROOT/usr/lib/cap/alsa-pulse.conf"
+          if [[ -n "$(find "$APPROOT" -name 'libwayland-client.so*' -print -quit)" ]]; then
+            echo "::error::The Cap AppImage bundles a Wayland client that can conflict with host Mesa drivers"
+            exit 1
+          fi
+          if [[ -n "$(find "$APPROOT/usr/lib" -maxdepth 1 -name 'libpipewire-0.3.so*' -print -quit)" ]]; then
+            echo "::error::The Cap AppImage bundles PipeWire that can conflict with host ALSA plugins"
+            exit 1
+          fi
+          if [[ -n "$(find "$APPROOT/usr/lib" -maxdepth 1 -name 'libva*.so*' -print -quit)" ]]; then
+            echo "::error::The Cap AppImage puts its libva where Cap loads it ahead of the host's, which breaks host PipeWire plugins"
+            exit 1
+          fi
+          test -e "$APPROOT/usr/lib/cap/libva/libva.so.2"
+          test -e "$APPROOT/usr/lib/cap/libva/libva-drm.so.2"
+          grep -qx 'exec "$cap_appdir/usr/bin/Cap" "$@"' "$APPROOT/AppRun"
+          if grep -q 'AppRun.cap-original' "$APPROOT/AppRun"; then
+            echo "::error::The Cap AppImage still starts through the generic AppImage launcher"
+            exit 1
+          fi
+
+      - name: Build Arch Linux package
+        id: build_arch
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CAP_BUNDLE/arch"
+          docker run --rm --network none \
+            --env CAP_PACKAGE_UID="$(id -u)" \
+            --volume "${{ github.workspace }}:/source:ro" \
+            --volume "${{ github.workspace }}/$CAP_BUNDLE/arch:/output" \
+            archlinux:base-devel@sha256:68bfc3b0d277b08a99101dc9b94aaa03e5ae70cf1b4fb965c03b2b87b915760d \
+            bash -c 'useradd --uid "$CAP_PACKAGE_UID" --create-home cap-package && runuser -u cap-package -- bash /source/scripts/build-linux-arch-package.sh "$1" /output' \
+            bash "/source/$CAP_BUNDLE/deb/Cap_0.6.99_amd64.deb"
+          PACKAGES=("$CAP_BUNDLE/arch/"*.pkg.tar.zst)
+          test "${#PACKAGES[@]}" -eq 1
+          test -s "${PACKAGES[0]}"
+          test "$(bsdtar -xOf "${PACKAGES[0]}" usr/lib/cap/package-format)" = arch
+      - name: Glibc floor report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set +e
+          R="$RUNNER_TEMP/floor"; mkdir -p "$R/x"
+          B="$GITHUB_WORKSPACE/$CAP_BUNDLE"
+          dpkg-deb -x "$B"/deb/*.deb "$R/x/deb"
+          mkdir -p "$R/x/rpm" "$R/x/arch" && bsdtar -xf "$B"/rpm/*.rpm -C "$R/x/rpm"; bsdtar -xf "$B"/arch/*.pkg.tar.zst -C "$R/x/arch"
+          (cd "$R/x" && "$B"/appimage/*.AppImage --appimage-extract >/dev/null && mv squashfs-root app)
+          dpkg-deb -I "$B"/deb/*.deb > "$R/deb-control.txt"
+          rpm -qpR "$B"/rpm/*.rpm > "$R/rpm-requires.txt"
+          for k in deb rpm arch app; do
+            (cd "$R/x/$k" && find . \( -type f -o -type l \) -printf '%p %s\n' | sort) > "$R/files-$k.txt"
+            find "$R/x/$k" -type f | while read -r f; do
+              head -c4 "$f" | grep -q $'\x7fELF' || continue
+              v=$(objdump -T "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -t. -k2,2n -k3,3n -u | tail -1)
+              x=$(objdump -T "$f" 2>/dev/null | grep -oE 'GLIBCXX_[0-9.]+' | sort -V -u | tail -1)
+              echo "${f#$R/x/$k/} ${v:-none} ${x:-}"
+            done | sort > "$R/glibc-$k.txt"
+            objdump -T "$R/x/$k/usr/bin/Cap" 2>/dev/null | grep -E 'GLIBC_2\.(3[6-9]|4[0-9])' > "$R/newsyms-$k.txt"
+            sha256sum $(find "$R/x/$k" -type f | sort) | sed "s|$R/x/$k/||" > "$R/sha-$k.txt"
+          done
+          cat "$R"/glibc-*.txt
+          rm -rf "$R/x"
+          cp -r "$B" "$R/bundle"
+
+      - name: Upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cb-pkg-${{ github.ref_name == 'ci/cb-pkg-base' && 'base' || 'head' }}
+          path: ${{ runner.temp }}/floor
+          retention-days: 5
+
+  harness-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 200
+    env:
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-desktop-deps
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Run setup
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      - name: Stage PipeWire headers
+        run: |
+          dir="$(bash scripts/stage-pipewire-headers.sh "$RUNNER_TEMP/pipewire-headers")"
+          echo "PKG_CONFIG_PATH=$dir" >> "$GITHUB_ENV"
+      - name: Prepare GPUI dependency
+        run: |
+          node scripts/sync-desktop-versions.mjs
+          ./scripts/prepare-gpui-dependency.sh
+      - name: Swap
+        run: |
+          sudo fallocate -l 16G /mnt/swapfile2 && sudo chmod 600 /mnt/swapfile2 && sudo mkswap /mnt/swapfile2 && sudo swapon /mnt/swapfile2; free -h
+      - name: Build the app
+        run: cargo +1.95.0 build --manifest-path apps/desktop-gpui/Cargo.toml --locked --release --bin cap-gpui
+      - name: Pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/h"
+          cp apps/desktop-gpui/target/release/cap-gpui "$RUNNER_TEMP/h/"
+          cp -a target/native-deps/lib "$RUNNER_TEMP/h/lib"
+          cp -a target/native-deps/onnxruntime/lib "$RUNNER_TEMP/h/ort"
+          objdump -T "$RUNNER_TEMP/h/cap-gpui" | grep -oE 'GLIBC_[0-9.]+' | sort -V -u | tail -3
+          tar -C "$RUNNER_TEMP/h" -czf "$RUNNER_TEMP/harness.tgz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cb-harness-${{ matrix.runner }}
+          path: ${{ runner.temp }}/harness.tgz
+          retention-days: 5
+
+  meetings:
+    needs: harness-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { built: ubuntu-22.04, run: ubuntu-24.04 }
+          - { built: ubuntu-22.04, run: ubuntu-22.04 }
+          - { built: ubuntu-22.04, run: ubuntu-24.04, rep: 2 }
+          - { built: ubuntu-22.04, run: ubuntu-22.04, rep: 2 }
+    runs-on: ${{ matrix.run }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the meeting harness tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends xvfb x11-utils xdotool imagemagick dbus \
+            pulseaudio pulseaudio-utils libasound2-plugins ffmpeg openssl openbox \
+            libva2 libva-drm2 libpipewire-0.3-0 libxkbcommon0 libxkbcommon-x11-0 libx11-6 libwayland-client0 libwayland-egl1 libegl1 libvulkan1 mesa-vulkan-drivers > /dev/null
+          if ! command -v google-chrome > /dev/null; then
+            curl -fsSL -o "$RUNNER_TEMP/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y -qq "$RUNNER_TEMP/chrome.deb" > /dev/null
+          fi
+          google-chrome --version; ldd --version | head -1
+      - uses: actions/download-artifact@v4
+        with:
+          name: cb-harness-${{ matrix.built }}
+          path: ${{ runner.temp }}
+      - name: Unpack
+        run: mkdir -p "$RUNNER_TEMP/h" && tar -C "$RUNNER_TEMP/h" -xzf "$RUNNER_TEMP/harness.tgz" && ldd "$RUNNER_TEMP/h/cap-gpui" | grep -E "not found|GLIBC" || true
+      - name: Restore the meeting models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/meeting-models
+          key: meeting-models-v1-${{ hashFiles('scripts/ci/meetings/models.sh') }}
+      - name: Download the meeting models
+        run: bash scripts/ci/meetings/models.sh "$RUNNER_TEMP/meeting-models"
+      - name: Scripted meetings on Xvfb
+        run: |
+          set +e
+          /usr/bin/time -v -o "$RUNNER_TEMP/time.txt" env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 \
+            LD_LIBRARY_PATH="$RUNNER_TEMP/h/lib" \
+            ORT_DYLIB_PATH="$RUNNER_TEMP/h/ort/libonnxruntime.so" \
+            CAP_MEETINGS_MODELS="$RUNNER_TEMP/meeting-models" \
+            dbus-run-session -- bash scripts/ci/meetings/linux.sh "$RUNNER_TEMP/h/cap-gpui" "$RUNNER_TEMP/meetings"
+          echo "rc=$?" | tee "$RUNNER_TEMP/meetings/rc.txt"
+          cp "$RUNNER_TEMP/time.txt" "$RUNNER_TEMP/meetings/"
+          nproc > "$RUNNER_TEMP/meetings/nproc.txt"; lscpu | grep "Model name" >> "$RUNNER_TEMP/meetings/nproc.txt"
+      - name: Upload the runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cb-meetings-${{ github.ref_name == 'ci/cb-pkg-base' && 'base' || 'head' }}-on-${{ matrix.run }}-${{ matrix.rep || 1 }}
+          path: |
+            ${{ runner.temp }}/meetings/*/check.txt
+            ${{ runner.temp }}/meetings/*/summary.json
+            ${{ runner.temp }}/meetings/*/score.json
+            ${{ runner.temp }}/meetings/*/app.log
+            ${{ runner.temp }}/meetings/*.txt
+            ${{ runner.temp }}/meetings/*/*.log
+          retention-days: 5
