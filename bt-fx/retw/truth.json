@@ -1,0 +1,297 @@
+{
+ "you": "p0",
+ "remote": [
+  "p1",
+  "p2"
+ ],
+ "duration_ms": 239740,
+ "utterances": [
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 1000,
+   "end_ms": 7050,
+   "text": "WERE I TO COMPLY WITH YOUR ORDERS WITHOUT EXPRESSING MY OWN OPINION I SHOULD SEEM TO HAVE DONE SO WILLINGLY HEREAFTER"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 7801,
+   "end_ms": 12181,
+   "text": "WHEN HE DID FINALLY SUMMON YOU HE SAID THINGS WHICH MUST HAVE WOUNDED YOU"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 13335,
+   "end_ms": 19195,
+   "text": "CRIED SHE I COULDN'T HAVE INFLUENCED HIM I'M SURE BY ANYTHING THAT I COULD HAVE SAID"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 19366,
+   "end_ms": 21686,
+   "text": "I KNOW THEY ARE BLESS THEM"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 22412,
+   "end_ms": 27582,
+   "text": "THEN SAID SIR FERDINANDO THERE IS NOTHING FOR IT BUT THAT HE MUST TAKE YOU WITH HIM"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 27832,
+   "end_ms": 33512,
+   "text": "ON ARRIVING AT HOME AT MY OWN RESIDENCE I FOUND THAT OUR SALON WAS FILLED WITH A BRILLIANT COMPANY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 34351,
+   "end_ms": 38691,
+   "text": "THE DOCTOR KEPT A KEEN LOOKOUT BUT NO ONE APPEARED"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 39479,
+   "end_ms": 43559,
+   "text": "SO ARCHIAS INTENDED TO LEAVE THE CITY ON ONE OF HIS OWN SHIPS THAT VERY DAY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 43938,
+   "end_ms": 48218,
+   "text": "DID IT NOT SPARE HIM A HUMILIATION AS GREAT AND PAINFUL AS COULD BE IMAGINED"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 48378,
+   "end_ms": 54308,
+   "text": "YET WHAT MATTERED IT EVEN IF THESE MISERABLE PEOPLE CONSIDERED THEMSELVES DECEIVED AND POINTED THE FINGER OF SCORN AT HIM"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 54898,
+   "end_ms": 60968,
+   "text": "BUT TELL ME SHOULD YOU WISH YOUR SONS TO BE LIKE MISTER HUNTINGDON OR EVEN LIKE YOURSELF"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 61162,
+   "end_ms": 62532,
+   "text": "FIRE AND FURY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 62865,
+   "end_ms": 71765,
+   "text": "OUT OF DEFERENCE TO LIDDY THEY WASHED THEIR DISHES ONCE A DAY AND THEY CONCOCTED QUEER MESSES ACCORDING TO THEIR SEVERAL ABILITIES"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 72597,
+   "end_ms": 77757,
+   "text": "AND THIS PLAN WAS ADOPTED TOO IN ORDER TO EXTRACT FROM ME A PROMISE THAT I WOULD DEPART IN PEACE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 78039,
+   "end_ms": 79379,
+   "text": "IT IS A DUTY SAID I"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 80400,
+   "end_ms": 87560,
+   "text": "YOUR UNCLE TOO HAS OFTEN WITH PRAISEWORTHY GENEROSITY HELPED ARSINOE IN MANY AN EMBARRASSMENT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 87914,
+   "end_ms": 95214,
+   "text": "DAPHNE AGAIN PLEADED FOR THE LIBERATION OF THE PRISONERS BUT PHILIPPUS SILENCED HER WITH THE GRAVE EXCLAMATION THE ORDER OF THE KING"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 95620,
+   "end_ms": 101120,
+   "text": "LET US HOPE THAT YOU WILL MAKE THIS THREE LEAVED CLOVER THE LUCK PROMISING FOUR LEAVED ONE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 102035,
+   "end_ms": 114215,
+   "text": "WHEN THIS CAPTAIN SHOULD HAVE TAKEN HIMSELF AND HIS VESSEL BACK TO ENGLAND I WOULD RETIRE TO A SMALL FARM WHICH I POSSESSED AT THE FARTHEST SIDE OF THE ISLAND AND THERE IN SECLUSION WOULD I END MY DAYS"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 114982,
+   "end_ms": 124882,
+   "text": "AS I SPOKE I MADE HIM A GRACIOUS BOW AND I THINK I SHOWED HIM BY MY MODE OF ADDRESS THAT I DID NOT BEAR ANY GRUDGE AS TO MY INDIVIDUAL SELF"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 124769,
+   "end_ms": 128679,
+   "text": "SO THE ARTIST FOUND HIMSELF OBLIGED TO RELINQUISH HIS OPPOSITION"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 129684,
+   "end_ms": 133784,
+   "text": "UPON PERUSING THIS SHE TURNED SCARLET AND BIT HER LIP"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 134645,
+   "end_ms": 139135,
+   "text": "HE WAS APPEARING BEFORE HIS COMPANIONS ONLY TO GIVE TRUTH ITS JUST DUE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 139674,
+   "end_ms": 145094,
+   "text": "THERE'S ONE THING SURE I'LL NOT BE SUSPECTED OF COMPLICITY"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 144929,
+   "end_ms": 146929,
+   "text": "YET IT WAS NO ILLUSION THAT DECEIVED HIM"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 147966,
+   "end_ms": 150206,
+   "text": "YES YES"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 150540,
+   "end_ms": 155750,
+   "text": "YOU MAY GO MILICENT AND SHE'LL FOLLOW IN A WHILE MILICENT WENT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 156616,
+   "end_ms": 164056,
+   "text": "HE LONGED WITH ARDENT YEARNING FOR THE SOUND OF HER VOICE AND STILL MORE TO UNBURDEN HIS SORELY TROUBLED SOUL TO HER"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 164628,
+   "end_ms": 166598,
+   "text": "WHERE'S MILICENT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 166772,
+   "end_ms": 170572,
+   "text": "IT IS A RESOLUTION YOU OUGHT TO HAVE FORMED LONG AGO"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 171202,
+   "end_ms": 177952,
+   "text": "HOW LONG HE KEPT YOU WAITING FOR THE FIRST WORD CONCERNING A WORK WHICH JUSTLY TRANSPORTED THE WHOLE CITY WITH DELIGHT"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 178239,
+   "end_ms": 181039,
+   "text": "WHATEVER MIGHT AWAIT HIM HE DESIRED NO BETTER FATE"
+  },
+  {
+   "track": "system",
+   "spk": "r-p1",
+   "start_ms": 181425,
+   "end_ms": 190155,
+   "text": "THOUGH SO LOUD A DENIAL IS WRITTEN ON YOUR FACE I PERSIST IN MY CONVICTION AND THAT NO IDLE DELUSION ENSNARES ME I CAN PROVE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 190525,
+   "end_ms": 195295,
+   "text": "THE PECULIAR CIRCUMSTANCES OF THE COLONY ARE WITHIN YOUR EXCELLENCY'S KNOWLEDGE"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 195452,
+   "end_ms": 197612,
+   "text": "THEIR MASTERS SAID MISSUS NEVERBEND"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 198702,
+   "end_ms": 203192,
+   "text": "IT WAS ALEX ARMED WITH TWO LONG HANDLED SPADES"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 203356,
+   "end_ms": 215476,
+   "text": "I SOMETIMES THINK I OUGHT TO GIVE HIM CREDIT FOR THE GOOD FEELING HE SIMULATES SO WELL AND THEN AGAIN I THINK IT IS MY DUTY TO SUSPECT HIM UNDER THE PECULIAR CIRCUMSTANCES IN WHICH I AM PLACED"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 216401,
+   "end_ms": 219021,
+   "text": "WHAT WOULD BECOME OF YOUR GUN WERE I TO KIDNAP YOU"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 219450,
+   "end_ms": 226110,
+   "text": "I WAS TO BE TAKEN AWAY AND CARRIED TO ENGLAND OR ELSEWHERE OR DROWNED UPON THE VOYAGE IT MATTERED NOT WHICH"
+  },
+  {
+   "track": "mic",
+   "spk": "you-p0",
+   "start_ms": 226416,
+   "end_ms": 232996,
+   "text": "YOU HAVE RECEIVED US WITH ALL THAT COURTESY AND HOSPITALITY FOR WHICH YOUR CHARACTER IN ENGLAND STANDS SO HIGH"
+  },
+  {
+   "track": "system",
+   "spk": "r-p2",
+   "start_ms": 233670,
+   "end_ms": 237740,
+   "text": "GIVE ME NO THANKS IT IS NOT FOR YOUR SAKE THAT I REFRAIN"
+  }
+ ]
+}
