@@ -1,0 +1,161 @@
+Ananya: हाँ, hello? Audio आ रहा है? ठीक है, ग्यारह बज गए हैं, let's start. Sneha आप हो, Rohit और Vikram अभी join नहीं हुए हैं।
+Person 3: हाँ, मैं हूँ। Rohit ने slack पे बोला था कि दो मिनट late होगा, किसी और call में फँसा हुआ है।
+Ananya: ओके. और Vikram... Vikram का तो पता ही है।
+Person 3: chai break. definitely chai break.
+Ananya: हाहा, हर stand-up में यही होता है, मतलब ग्यारह बजे का chai उसका, uh, sacred है।
+Person 4: hello, hello, सॉरी सॉरी, मैं आ गया। और for the record, chai नहीं थी, पानी लेने गया था।
+Person 3: हाँ हाँ, पानी। cup में से भाप निकल रही है Vikram।
+Person 4: वो... गरम पानी है। health के लिए।
+Ananya: ठीक है ठीक है. Rohit अभी आएगा, तब तक, uh, Snaha तुम blocker से शुरू करो, क्योंकि वही सबसे important है आज।
+Person 2: hi, hi, सॉरी, मैं join हो गया, पिछली call overrun कर गई।
+Ananya: perfect timing, हम payments वाले blocker पे ही आ रहे थे। Sneha, go ahead।
+Person 3: हाँ तो, basically, staging में हम UPI flow test कर रहे थे Dhan Path gateway के through. और जब gateway का callback, uh, दस seconds से ज़्यादा लेता है, मतलब 10 second का जो timeout है वो cross होता है, तो हमारा app payment को retry कर देता है। और retry में कोई idempotency key नहीं जाती। तो gateway को लगता है कि ये नया payment है, और customer का double debit हो जाता है।
+Ananya: ओह. और ये कितनी बार हुआ?
+Person 3: हमने total 1750 test transactions चलाए थे, उसमें से fourteen में double debit आया। तो roughly, uh, 0.8 percent।
+Person 4: 0.8 percent कम लगता है but production scale पे तो ये, मतलब...
+Person 3: हाँ, बहुत ज़्यादा है। हर सौ orders में लगभग एक बंदे का दो बार पैसा कट रहा है।
+Ananya: हाँ, ये definitely release blocker है। Rohit, तुमने देखा है ये?
+Person 2: हाँ, मैंने कल रात logs देखे थे Sneha के ticket से। root cause clear है, मतलब कोई mystery नहीं है। retry वाले path में हम item potency key generate ही नहीं कर रहे, जो refactor से पहले था वो, uh, refactor में drop हो गया। तो fix straightforward है। दो दिन, max।
+Ananya: दो दिन. ओके, that's...
+Person 2: हाँ, सिर्फ retry logic change करना है, key add करनी है और gateway को वही key भेजनी है दोबारा...
+Person 3: नहीं, पर सिर्फ retry नहीं है, वो जो...
+Person 2: मतलब retry logic में ही तो...
+Person 3: सॉरी, सॉरी, बोलो तुम।
+Person 2: नहीं नहीं, तुम बोलो, क्या बोल रही थी?
+Person 3: मैं ये बोल रही थी कि retry fix करने से आगे के double debits रुक जाएँगे, ठीक है। लेकिन जो nightly recon silly a shun job है, वो order ID पे match करती है, gateway transaction ID पे नहीं। तो जब एक order के against दो transactions आते हैं, तो job को एक ही दिखता है, क्योंकि order ID same है। मतलब जो already duplicate हो चुके हैं, या जिनके refunds duplicate हुए हैं, वो पकड़ में ही नहीं आएँगे।
+Person 2: हम्म।
+Person 3: तो मेरे हिसाब से वो job भी fix होनी चाहिए, नहीं तो हम blind रहेंगे।
+Person 2: हाँ यार, वो भी touch करना पड़ेगा। सही बोल रही हो। मैंने reconciliation का angle सोचा ही नहीं था, मैं सिर्फ, uh, payment path देख रहा था।
+Ananya: तो फिर estimate क्या है? दो दिन still?
+Person 2: नहीं, फिर दो दिन नहीं होगा। reconciliation job में matching logic बदलना है, gateway transaction ID पे shift करना है, और उसके tests लिखने पड़ेंगे, क्योंकि वो job finance वाले reports भी feed करती है। तो uh, मैं बोलूँगा चार working days, tests including।
+Ananya: चार working days. आज Thursday है, तो...
+Person 2: हाँ, कल Friday, फिर Monday, Tuesday, Wednesday। तो Wednesday तक, पच्चीस तारीख तक, मैं QA को hand over कर दूँगा। retry पे idempotency key भी और recon job में gateway transaction ID वाली matching भी, दोनों।
+Ananya: ठीक है. तो scope clear कर लेते हैं, fix में दोनों चीज़ें हैं, एक retry logic में idempotency key, और दूसरा reconciliation job order ID की जगह gateway transaction ID पे match करेगी। Right?
+Person 2: हाँ, दोनों। एक ही PR में नहीं, शायद दो PRs होंगे, लेकिन दोनों Wednesday तक।
+Person 3: और मुझे please दोनों साथ में चाहिए testing के लिए, अलग-अलग आएँगे तो मुझे दो बार regression चलाना पड़ेगा।
+Person 2: हाँ, ठीक है, मैं साथ में ही दूँगा।
+Person 4: एक सवाल, uh, ये थोड़ा, मतलब, off track है, लेकिन जब तक ये fix नहीं होता, हम UPI को backup gateway पे route क्यों नहीं कर देते? config change है, मैं आधे घंटे में कर सकता हूँ।
+Person 2: हम्म, कर सकते हैं technically, पर backup gateway का settlement T plus 2 है। Dhan Path पे T plus 1 है। तो हर दिन का पैसा एक दिन late आएगा, और festival season में volume भी ज़्यादा होगा। finance वाले, मतलब, definitely object करेंगे। पिछली बार भी जब हमने दो दिन के लिए switch किया था तो उन्होंने बहुत, uh, बहुत हल्ला किया था।
+Person 4: हाँ, पर double debit से तो better है ना? customer का पैसा दो बार कटे वो ज़्यादा बुरा है।
+Person 2: हाँ, वो भी है, मैं मना नहीं कर रहा, बस बोल रहा हूँ कि ये हम अपने level पे decide नहीं कर सकते।
+Ananya: हाँ, I think ये अभी open रखते हैं। मैं ना हाँ बोल रही हूँ ना ना, बस अभी इसपे decision नहीं ले रहे। finance का angle है, देखते हैं fix कितनी जल्दी आता है।
+Person 4: ठीक है, fair।
+Ananya: लेकिन एक चीज़ clear है, v4.12 ship नहीं होगा जब तक ये double debit वाला fix QA pass नहीं करता। Combo Thali वगैरह सब ready हो, तो भी नहीं।
+Person 3: हाँ, agreed. मैं sign-off नहीं दूँगी उसके बिना।
+Person 2: हाँ, obviously, मैं भी यही बोलता।
+Ananya: ठीक है. अब, Sneha, ये जो callback दस second से ज़्यादा ले रहा है, वो उनकी side से है या हमारी side से? किसी को पता है?
+Person 3: अभी पता नहीं है honestly. हमारे side से request time पे जा रही है, logs में दिख रहा है, लेकिन callback late आता है। हो सकता है उनका issue हो, हो सकता है हमारे staging network में कुछ हो।
+Person 4: staging का ingress थोड़ा, uh, slow है कभी-कभी, मैं deny नहीं करूँगा। लेकिन दस second? इतना तो नहीं।
+Person 3: तो मैं Dhanpath support के साथ ticket raise कर देती हूँ, पूछती हूँ कि callbacks दस second से ऊपर क्यों जा रहे हैं, और जो भी response आता है वो team के साथ share कर दूँगी।
+Ananya: perfect. कोई date तो नहीं दे सकते क्योंकि वो उनके ऊपर है, पर जल्दी raise कर देना।
+Person 3: हाँ, आज ही raise कर देती हूँ, response कब आएगा वो पता नहीं, उनका support, you know, थोड़ा slow है।
+Person 2: बहुत slow। पिछली बार तीन हफ्ते लगे थे webhook वाले issue पे।
+Person 4: तीन हफ्ते में तो हमारी chai...
+Person 3: पानी, Vikram, पानी।
+Person 4: हाँ हाँ, पानी।
+Ananya: ओके focus, focus. एक और चीज़, Sneha तुमने ticket में लिखा था कुछ production के बारे में?
+Person 3: हाँ, वो side note था। पिछले हफ्ते production में भी, old flow पे, around nine customers का double charge हुआ था। support ने उनको manually refund कर दिया है already। तो वो closed है, मतलब customers के लिए।
+Ananya: nine. ओके. वो list मुझे अलग से भेज देना, बस मैं देखना चाहती हूँ कौन से orders थे।
+Person 3: हाँ, भेज दूँगी।
+Person 2: पर ये nine वो हैं जिन्होंने complain किया, right? जिन्होंने complain नहीं किया उनका क्या?
+Person 3: हाँ, यही तो, वही reconciliation वाला problem है। job order ID पे match करती है तो हमें पता ही नहीं चलेगा कि और कोई है या नहीं।
+Ananya: हम्म, मतलब nine के अलावा भी कोई हो सकता है जिसका double debit हुआ और reconcile नहीं हुआ?
+Person 3: हो सकता है, मैं बोल नहीं सकती पक्का।
+Person 4: तो कौन check करेगा वो?
+Person 2: मतलब, fix के बाद job चलेगी तो शायद, uh, पुराना data भी दिख जाए, पर वो backfill अलग चीज़ है, अभी मैं commit नहीं कर रहा।
+Ananya: ठीक है, वो अभी open question रखते हैं, बाद में देखेंगे। अभी priority fix है।
+Person 4: वैसे Tally wala के app पे refund का status दिखता है ना customers को? या सिर्फ SMS जाता है?
+Person 3: सिर्फ SMS जाता है, और email। in-app नहीं है अभी।
+Person 4: वो भी add होना चाहिए, किसी sprint में।
+Ananya: हाँ, backlog में डाल दो Vikram, अभी नहीं। ओके, तो payments पे summary, release blocked है जब तक fix QA pass नहीं करता, Rohit Wednesday पच्चीस तक दोनों चीज़ें hand over करेगा, retry पे idempotency key और reconciliation job की matching, और Sneha Dhanpath support से बात करेगी callback delay के बारे में। backup gateway वाला idea अभी open है। सब ठीक?
+Person 2: हाँ।
+Person 3: हाँ, ठीक है।
+Person 4: हाँ, done। अब मेरा load test वाला?
+Ananya: हाँ, Vikram, अब तुम्हारी बारी, festival season वाला load test।
+Person 4: ओके, तो, uh, wedding season और New Year's Eve से पहले हमें load test करना है। मेरा proposal था कि हम पाँच हज़ार OPN का target रखें, five thousand orders per minute, staging पे, और देखें कि system कहाँ तक टिकता है।
+Ananya: पाँच हज़ार? Vikram, last year New Year's Eve पे peak कितना था, याद है?
+Person 4: Uh, हाँ, था कुछ, six thousand के आसपास?
+Ananya: Sixty two hundred था। 6,200 OPM। मेरे पास वो dashboard का screenshot अभी भी पड़ा है।
+Person 2: हाँ यार, वो रात तो याद है, मैं तो पार्टी छोड़ के laptop खोल के बैठा था।
+Person 4: Haha, हाँ, हाँ।
+Ananya: तो अगर पिछले साल ही 6,200 था, और marketing वाले बोल रहे हैं कि इस साल around twenty percent ज़्यादा orders आएंगे, तो पाँच हज़ार पे test करने का कोई मतलब नहीं है ना। हम already पिछले साल के peak से नीचे test कर रहे होंगे।
+Person 4: नहीं, मेरा logic ये था कि, uh, पाँच हज़ार तो sustained load है, peak थोड़ी देर के लिए ही आता है, तो...
+Ananya: Peak थोड़ी देर का ही हो, पर उसी थोड़ी देर में अगर app गिर गया तो...
+Person 4: हाँ, हाँ, point है। ठीक है।
+Person 3: और twenty percent बोल रहे हैं marketing वाले, वो हमेशा कम ही बोलते हैं, last time भी पंद्रह बोला था और actual ज़्यादा था।
+Person 4: तो, uh, 6,200 का twenty percent, कितना हुआ, seventy four hundred के आसपास?
+Person 2: हाँ, 7,440 कुछ।
+Person 4: तो seventy five hundred रख लें?
+Ananya: मुझे थोड़ा headroom चाहिए। मतलब exactly expected number पे test करोगे तो margin कुछ नहीं बचता। Thirty percent headroom रखो पिछले साल के peak पे, तो roughly...
+Person 2: Eight thousand। Eight thousand sixty आता है।
+Ananya: हाँ, eight thousand round कर देते हैं।
+Person 4: Eight thousand OPN। Hmm. ठीक है, मुझे कोई problem नहीं है, बस मैं बता दूँ कि अभी staging का हाल क्या है, फिर decide करते हैं।
+Ananya: हाँ बोलो।
+Person 4: Last week मैंने एक quick run किया था। Current staging setup पे हम 3,400 OPM तक गए, उसके बाद p95 latency दो second cross कर गई। Two seconds से ऊपर।
+Person 3: चौंतीस सौ? बस?
+Person 4: हाँ, बस। और bottleneck clearly order service का database है। CPU भी ठीक है, app pods भी scale हो रहे थे, पर DB पे reads बहुत heavy हैं, वो choke कर रहा था।
+Person 2: वो order history वाली query होगी ना, जो हर बार home screen पे चलती है?
+Person 4: वो भी है, और order status का polling भी। तो मेरा suggestion है कि हम दो read replicas add करें, two read replicas, order service DB के लिए। Cost roughly एक point आठ lakh per month extra आएगा।
+Ananya: One point eight lakh, monthly?
+Person 4: हाँ, monthly, ₹1.8 lakh के आसपास, depending on instance size।
+Ananya: देखो, वो मैं अभी approve नहीं कर सकती। Finance head से बात करनी पड़ेगी पहले, budget है या नहीं। इस quarter में already cloud cost पे थोड़ा pushback आया है।
+Person 4: हाँ, समझ सकता हूँ।
+Ananya: तो replicas वाला अभी pending है, मैं finance से check करती हूँ। पर test तो रुकना नहीं चाहिए। ऐसा करते हैं, current setup पे ही eight thousand वाला test चलाओ, जो है वैसे ही, ताकि हमारे पास एक proper baseline हो। फिर उसी data के साथ मैं finance को दिखा सकती हूँ कि देखो, यहाँ गिरता है, इसलिए replicas चाहिए।
+Person 4: हाँ, वो actually अच्छा है, data के साथ बात करना easy होगा।
+Person 3: पर, sorry, एक सवाल, अगर अभी 3,400 पे ही latency दो second से ऊपर जा रही है, तो eight thousand पे तो पूरा...
+Person 4: हाँ, गिरेगा, शायद। मतलब मुझे honestly नहीं पता कि बिना कुछ बदले eight thousand तक पहुँच भी पाएंगे या नहीं।
+Person 3: तो फिर test का फ़ायदा क्या?
+Person 4: फ़ायदा ये है कि हमें पता चलेगा exactly कहाँ टूटता है, कौन सा component पहले जाता है। DB पहले जाता है या कुछ और। वो baseline ही तो चाहिए।
+Ananya: हाँ, exactly। Vikram, वो तुम देख लो, कि realistically staging eight thousand तक जा सकता है या नहीं बिना infra change के, वो question तुम्हारे पास ही है।
+Person 4: ठीक है, मैं देख लूंगा।
+Person 2: वैसे, uh, connection pooling भी एक बार check कर लेना, पिछली बार pool size बहुत कम था।
+Person 4: हाँ, वो मैं, haan, note कर रहा हूँ।
+Ananya: ओके। तो load test का target eight thousand OPM, current setup पे baseline। Done. अब, uh, release date। मुझे product वालों को कुछ बताना है, वो पूछ रहे हैं।
+Person 2: Hmm.
+Ananya: मैं सोच रही थी अगले Thursday, छब्बीस November, क्या वो possible है?
+Person 2: छब्बीस? नहीं, नहीं यार, वो बहुत tight है। मेरा ही estimate चार working days है, fix का, tests के साथ। पच्चीस को मैं hand over करूँगा, उसके बाद Sneha को भी तो time चाहिए ना QA के लिए।
+Person 3: हाँ, मुझे कम से कम, uh, दो-तीन दिन चाहिए। Full regression, payments का, plus Combo Thali का flow, plus double debit वाला scenario बार-बार चलाना पड़ेगा, timeout simulate करके।
+Person 2: और अगर QA में कुछ निकल आया तो फिर से fix...
+Ananya: हाँ, ठीक है, ठीक है, छब्बीस realistic नहीं है।
+Person 3: मैं suggest करूँगी Tuesday, एक December। वो थोड़ा safe है।
+Ananya: एक December... Hmm, Tuesday है वो?
+Person 3: हाँ, Tuesday।
+Person 4: Monday release तो वैसे भी नहीं करते हम।
+Person 2: एक December ठीक लग रहा है मुझे, पर, I mean, मैं अभी उसपे भी commit नहीं करना चाहता, जब तक fix में कुछ और surprise ना निकले।
+Ananya: ठीक है, तो abhi कोई date commit नहीं करते। छब्बीस और एक December दोनों table पे हैं, पर हम Monday के stand-up में decide करेंगे, fix कितना आगे गया है वो देख के। Product को मैं यही बोल दूँगी कि Monday तक date आएगी।
+Person 3: Monday, तेईस, ना?
+Ananya: हाँ, Monday तेईस।
+Person 3: ओके। और, uh, एक idea था, Combo Thali को अलग से नहीं निकाल सकते क्या? Feature flag के पीछे? मतलब payments वाला fix ready ना हो तो कम से कम Combo Thali तो चला जाए, marketing उसको wedding season के लिए push करना चाहती है।
+Person 4: हाँ, ये अच्छा है actually।
+Person 2: नहीं, वो, uh, वो मुश्किल है। Payments refactor और Combo Thali दोनों cart service share करते हैं। Combo Thali का जो cart का नया structure है, वो refactor के ऊपर ही बना है। अलग करने के लिए मुझे cart service का पुराना version maintain करना पड़ेगा, और flag के पीछे दोनों रास्ते test करने पड़ेंगे।
+Person 3: ओह, cart service same है?
+Person 2: हाँ, same है। अलग निकालोगे तो double काम है, और risk भी ज़्यादा।
+Person 3: फिर तो मेरे लिए भी double testing है। ठीक है, scratch that।
+Ananya: हाँ, तो दोनों साथ ही जाएंगे, v4.12 में Combo Thali और payments refactor together। कोई separate flag release नहीं।
+Person 2: हाँ।
+Person 4: ठीक है।
+Ananya: ओके, time हो रहा है, जल्दी से recap कर देती हूँ action items। एक, Rohit, retry पे item potency key और recon silly a shun job की matching, gateway transaction ID पे, Wednesday पच्चीस तक QA को hand over।
+Person 2: हाँ, पच्चीस।
+Ananya: दो, Snaha, Dhan Path support को ticket raise करो, callback दस second से ज़्यादा क्यों ले रहा है, और जो भी जवाब आए वो team के साथ share करना।
+Person 3: हाँ, आज ही raise कर देती हूँ।
+Ananya: और तीन, Vikram, eight thousand OPM का load test staging पे, current setup, और p95 latency और DB metrics share करना। कब तक हो जाएगा?
+Person 4: Uh, Tuesday तक? चौबीस?
+Ananya: हाँ, Tuesday चौबीस, ठीक है, Monday stand-up के बाद अगले दिन, perfect।
+Person 4: पर load test में payment step मैं skip कर रहा हूँ, सिर्फ browse, cart, order place तक...
+Person 2: नहीं, नहीं, payment step तो होना चाहिए यार, वही तो...
+Person 4: अरे पर real gateway पे eight thousand per minute मारोगे तो...
+Person 2: Real पे नहीं बोल रहा, मैं...
+Person 4: ...Dhanpath वाले हमें block कर देंगे।
+Person 2: Sandbox, sandbox पे बोल रहा हूँ। Payment step में ही तो हमारा retry logic है, callback handling है, अगर वो test नहीं किया तो आधा picture है।
+Person 4: Hmm, sandbox पे, ठीक है। पर sandbox का rate limit check करना पड़ेगा।
+Person 2: वो मैं बता दूँगा, मेरे पास docs हैं।
+Ananya: ओके, तो final, load test में payment step include होगा, पर सिर्फ Dhanpath sandbox के against, production gateway पे बिल्कुल नहीं। ठीक?
+Person 4: हाँ, done, sandbox only।
+Person 2: हाँ।
+Ananya: और मैं finance head से replicas के budget के बारे में बात कर लूँगी, वो मेरे पास है, पर वो अभी approved नहीं है, clear रहे।
+Person 4: हाँ, समझ गया।
+Person 3: Ananya, वो nine customers वाली list मैं आपको अलग से भेज दूँगी।
+Ananya: हाँ, thanks Sneha। ओके सब, thanks, Monday मिलते हैं। Vikram, चाय break अब ले लो।
+Person 4: Haha, already बन रही है।
+Person 2: Bye।
+Person 3: Bye bye।
