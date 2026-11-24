@@ -1,0 +1,74 @@
+name: Launch speed binaries (scratch)
+
+on:
+  push:
+    branches:
+      - scratch/launch-speed
+
+concurrency:
+  group: launch-speed-bins
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Release binaries (macOS)
+    runs-on: blacksmith-6vcpu-macos-15
+    timeout-minutes: 170
+    env:
+      TARGET: aarch64-apple-darwin
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: ${{ env.TARGET }}
+
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: ${{ env.TARGET }}
+          prefix-key: v1-rust-release
+          save-cache: "false"
+          workspaces: |
+            . -> target
+            apps/desktop-gpui -> target
+
+      - name: Run setup
+        shell: bash
+        run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: ${{ env.TARGET }}
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/bins"
+          mkdir -p "$out"
+          built="apps/desktop-gpui/target/$TARGET/release/cap-gpui"
+          ./scripts/build-gpui-binary.sh release "$TARGET"
+          cp "$built" "$out/cap-gpui-base"
+          for variant in $VARIANTS; do
+            git checkout -- apps/desktop-gpui/src
+            for patch in scripts/launch-speed/$variant/*.py; do
+              python3 "$patch" apps/desktop-gpui
+            done
+            ./scripts/build-gpui-binary.sh release "$TARGET"
+            cp "$built" "$out/cap-gpui-$variant"
+          done
+          git checkout -- apps/desktop-gpui/src
+          shasum -a 256 "$out"/* | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          VARIANTS: exp
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: launch-speed-bins
+          path: ${{ runner.temp }}/bins
+          retention-days: 3
