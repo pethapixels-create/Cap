@@ -396,6 +396,7 @@ async fn measure_playback(
         let video_events = video_events.clone();
         move |output, _layout| {
             let now = Instant::now();
+            probe_frame(&output);
             if let EditorFrameOutput::Rgba(frame) = output {
                 if let Some(luma) = mean_center_luma_rgba(
                     &frame.data,
@@ -937,5 +938,85 @@ mod fixture {
             .map_err(|e| format!("failed to write project config: {e}"))?;
 
         Ok(())
+    }
+}
+
+static PROBE_FRAMES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn probe_frame(output: &EditorFrameOutput) {
+    let n = PROBE_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    match output {
+        EditorFrameOutput::Rgba(frame) => {
+            let width = frame.width as usize;
+            let height = frame.height as usize;
+            let stride = frame.padded_bytes_per_row as usize;
+            if width == 0 || height == 0 || frame.data.len() < stride * height {
+                eprintln!("PROBE frame n={n} rgba malformed w={width} h={height} stride={stride} len={}", frame.data.len());
+                return;
+            }
+            let mut sum = [0u64; 4];
+            let mut alpha_zero = 0u64;
+            let mut white = 0u64;
+            let mut black = 0u64;
+            let mut count = 0u64;
+            for y in (0..height).step_by(2) {
+                let row = &frame.data[y * stride..y * stride + width * 4];
+                for px in row.chunks_exact(4).step_by(2) {
+                    for c in 0..4 {
+                        sum[c] += u64::from(px[c]);
+                    }
+                    if px[3] == 0 {
+                        alpha_zero += 1;
+                    }
+                    if px[0] > 240 && px[1] > 240 && px[2] > 240 {
+                        white += 1;
+                    }
+                    if px[0] < 16 && px[1] < 16 && px[2] < 16 {
+                        black += 1;
+                    }
+                    count += 1;
+                }
+            }
+            let c = count.max(1) as f64;
+            if n < 12 || n % 15 == 0 {
+                eprintln!(
+                    "PROBE frame n={n} rgba {width}x{height} frame_number={} mean=[{:.1},{:.1},{:.1},{:.1}] white={:.3} black={:.3} alpha0={:.3}",
+                    frame.frame_number,
+                    sum[0] as f64 / c,
+                    sum[1] as f64 / c,
+                    sum[2] as f64 / c,
+                    sum[3] as f64 / c,
+                    white as f64 / c,
+                    black as f64 / c,
+                    alpha_zero as f64 / c,
+                );
+            }
+            if let Some(dir) = std::env::var_os("CAP_PROBE_DUMP_DIR")
+                && (n < 3 || n % 45 == 0)
+            {
+                let mut ppm = format!("P6\n{width} {height}\n255\n").into_bytes();
+                for y in 0..height {
+                    let row = &frame.data[y * stride..y * stride + width * 4];
+                    for px in row.chunks_exact(4) {
+                        ppm.extend_from_slice(&px[..3]);
+                    }
+                }
+                let path = PathBuf::from(dir).join(format!("frame-{n:05}.ppm"));
+                if let Err(error) = std::fs::write(&path, ppm) {
+                    eprintln!("PROBE dump failed: {error}");
+                }
+            }
+        }
+        EditorFrameOutput::Nv12(frame) => {
+            if n < 12 || n % 15 == 0 {
+                eprintln!("PROBE frame n={n} nv12 {}x{} frame_number={}", frame.width, frame.height, frame.frame_number);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        EditorFrameOutput::Surface(_) => {
+            if n < 12 || n % 15 == 0 {
+                eprintln!("PROBE frame n={n} surface");
+            }
+        }
     }
 }

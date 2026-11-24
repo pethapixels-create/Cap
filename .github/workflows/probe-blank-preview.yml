@@ -1,0 +1,96 @@
+name: Probe blank preview
+
+on:
+  push:
+    branches:
+      - probe/blank-preview-warp
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-pc-windows-msvc
+          prefix-key: v1-rust-sync
+          save-cache: false
+
+      - name: Install desktop dependencies
+        uses: ./.github/actions/install-desktop-deps
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Native dependencies
+        env:
+          RUST_TARGET_TRIPLE: x86_64-pc-windows-msvc
+        run: node scripts/setup.js
+
+      - name: Add FFmpeg DLLs to PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\\target\\ffmpeg\\bin"
+
+      - name: Install virtual audio device
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/duncanthrax/scream/releases/download/3.6/Scream3.6.zip -OutFile Scream3.6.zip
+          $expected = "25ea5e778b4e6995a98d448b9b5f6d321f681663f1aeeec69d8e63183d008b19"
+          $actual = (Get-FileHash -Algorithm SHA256 Scream3.6.zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Scream3.6.zip SHA-256 mismatch: got $actual, expected $expected" }
+          Expand-Archive -Path Scream3.6.zip -DestinationPath Scream
+          $cert = (Get-AuthenticodeSignature Scream\Install\driver\Scream.sys).SignerCertificate
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new("TrustedPublisher", "LocalMachine")
+          $store.Open("ReadWrite")
+          $store.Add($cert)
+          $store.Close()
+          Scream\Install\helpers\devcon.exe install Scream\Install\driver\Scream.inf *Scream
+          if ($LASTEXITCODE -gt 1) { throw "devcon install failed with exit code $LASTEXITCODE" }
+          Start-Service -Name Audiosrv -ErrorAction SilentlyContinue
+
+      - name: Machine
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List
+          Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, AdapterRAM | Format-List
+
+      - name: Build CLI
+        shell: bash
+        run: cargo build --locked -p cap
+
+      - name: Editor playback on the software adapter
+        shell: bash
+        continue-on-error: true
+        env:
+          CAP_PROBE_DUMP_DIR: ${{ github.workspace }}/probe-out
+        run: |
+          mkdir -p probe-out
+          cargo run --locked -p cap -- --log-level debug selftest playback --duration 12 --skip-export --keep --json > probe-out/report.json 2> probe-out/playback.log || echo "exit $?"
+          cat probe-out/report.json || true
+          grep -a -E "PROBE|adapter|decoder|Decoder|WARN|ERROR" probe-out/playback.log | head -400 || true
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.runner }}
+          path: probe-out
+          retention-days: 3

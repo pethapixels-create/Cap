@@ -679,6 +679,14 @@ impl DisplayLayer {
 
         let uniforms = self.resolve_enhancement(device, uniforms);
         uniforms.write_to_buffer(queue, &self.uniforms_buffer);
+        probe_display(
+            "prepare",
+            screen_frame,
+            skipped,
+            frame_uploaded,
+            self.has_valid_frame,
+            self.prefer_cpu_conversion,
+        );
         (
             (skipped && self.has_valid_frame) || frame_uploaded,
             actual_width,
@@ -1090,6 +1098,14 @@ impl DisplayLayer {
             }
         }
 
+        probe_display(
+            "prepare_with_encoder",
+            screen_frame,
+            skipped,
+            frame_uploaded,
+            self.has_valid_frame,
+            self.prefer_cpu_conversion,
+        );
         let uniforms = self.resolve_enhancement(device, uniforms);
         uniforms.write_to_buffer(queue, &self.uniforms_buffer);
         (skipped && self.has_valid_frame) || frame_uploaded
@@ -1164,4 +1180,50 @@ impl DisplayLayer {
             );
         }
     }
+}
+
+static PROBE_DISPLAY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn probe_display(
+    path: &str,
+    frame: &crate::DecodedFrame,
+    skipped: bool,
+    uploaded: bool,
+    valid: bool,
+    prefer_cpu: bool,
+) {
+    let n = PROBE_DISPLAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if n >= 12 && n % 15 != 0 {
+        return;
+    }
+    let data = frame.data();
+    let step = (data.len() / 4096).max(1);
+    let (mut sum, mut zero, mut count) = (0u64, 0u64, 0u64);
+    for byte in data.iter().step_by(step) {
+        sum += u64::from(*byte);
+        if *byte == 0 {
+            zero += 1;
+        }
+        count += 1;
+    }
+    let y_mean = frame.y_plane().map(|y| {
+        let step = (y.len() / 4096).max(1);
+        let (s, c) = y
+            .iter()
+            .step_by(step)
+            .fold((0u64, 0u64), |(s, c), b| (s + u64::from(*b), c + 1));
+        s as f64 / c.max(1) as f64
+    });
+    eprintln!(
+        "PROBE display n={n} path={path} format={:?} {}x{} len={} mean={:.1} zero={:.3} y_mean={:?} y_stride={} uv_stride={} skipped={skipped} uploaded={uploaded} valid={valid} prefer_cpu={prefer_cpu}",
+        frame.format(),
+        frame.width(),
+        frame.height(),
+        data.len(),
+        sum as f64 / count.max(1) as f64,
+        zero as f64 / count.max(1) as f64,
+        y_mean,
+        frame.y_stride(),
+        frame.uv_stride(),
+    );
 }

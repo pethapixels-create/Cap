@@ -1315,7 +1315,8 @@ impl FfmpegDecoder {
                             } else {
                                 let black_frame_data =
                                     vec![0u8; (video_width * video_height * 4) as usize];
-                                let black_frame = OutputFrame {
+                                eprintln!("PROBE ffmpeg decoder answered with a zeroed placeholder frame requested={requested_frame}");
+                            let black_frame = OutputFrame {
                                     number: requested_frame,
                                     frame: DecodedFrame::new_with_arc(
                                         Arc::new(black_frame_data),
@@ -1878,6 +1879,7 @@ impl FfmpegDecoder {
                         } else {
                             let black_frame_data =
                                 vec![0u8; (video_width * video_height * 4) as usize];
+                            eprintln!("PROBE ffmpeg decoder answered with a zeroed placeholder frame requested={requested_frame}");
                             let black_frame = OutputFrame {
                                 number: requested_frame,
                                 frame: DecodedFrame::new_with_arc(
