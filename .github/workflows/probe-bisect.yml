@@ -20,13 +20,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: c04, sha: 2fcb4ae0907deca7c54334479646b07924a4c7c3 }
-          - { label: c09, sha: 7fee58dedf321bf2874262a4c110d5ea95ba22c6 }
-          - { label: c13, sha: 569d0c7f93b2a014ff1463acf93226ca0a92a6c7 }
-          - { label: c18, sha: 21fd8425f606e9cd8c4370a889a2ffc6c8957b8f }
-          - { label: c22, sha: 170eada2c13304f245dacd719bd201a23d55c8be }
-          - { label: c27, sha: 05f1377eb675337a4e4341c6ddc3289f98fbc2c1 }
-          - { label: c31, sha: 6af4ec965675ff0586dd5545ba0d01d30173c2a4 }
+          - { label: c46, sha: 7f03de634fe5fbb2cefb7752827de1988146eace }
+          - { label: c47, sha: ea4a2c0ae38b75cf0c990bc32d77170292957fcc }
+          - { label: c48, sha: 93622e4c94a3057c28f4c5f3abb6df238a9acda7 }
+          - { label: c49, sha: a22f7d24ed60c9488f16bb38ba406dfb2fae0be4 }
+          - { label: c50, sha: 052206ee6b49b8515e5be2aa75d897c36628bb11 }
+          - { label: c51, sha: ab921e4a5ae11644ec80d791448ad0ffe24276c6 }
+          - { label: c52, sha: 5b07a0ba15bb95911a6d3635ababfea733a1dc06 }
+          - { label: c53, sha: ee4b9717a996af15151323d200f99e300a078355 }
     runs-on: blacksmith-8vcpu-windows-2025
     timeout-minutes: 120
     steps:
@@ -35,11 +36,6 @@ jobs:
         with:
           ref: ${{ matrix.sha }}
           persist-credentials: false
-      - name: Current setup script
-        shell: bash
-        run: |
-          git fetch -q --depth 1 origin 09bdc687c1adc0284916d635c8ad8eca9a46ed59
-          git show FETCH_HEAD:scripts/setup.js > scripts/setup.js
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: x86_64-pc-windows-msvc
