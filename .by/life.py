@@ -483,9 +483,18 @@ def cmd_glpanic(a):
     opens the editor when it ends, again and again; counts wgpu adapter-context panics per round."""
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     for rnd in range(a.rounds):
-        r = profile(out / "runs" / f"gl-{rnd}", False)
-        extra = {"VK_ICD_FILENAMES": "/nonexistent.json", "VK_DRIVER_FILES": "/nonexistent.json",
-                 "CAP_GPUI_AUTO_RECORD": f"studio:{a.secs}", "RUST_LOG": "info"}
+        r = profile(out / "runs" / f"gl{a.tag}-{rnd}", False)
+        extra = {"VK_ICD_FILENAMES": "/nonexistent.json", "VK_DRIVER_FILES": "/nonexistent.json", "RUST_LOG": "info"}
+        if a.cap:
+            dst = r / "rec" / "fixture.cap"
+            shutil.copytree(a.cap, dst, dirs_exist_ok=True)
+            extra["CAP_GPUI_AUTO_EDITOR"] = str(dst)
+        else:
+            extra["CAP_GPUI_AUTO_RECORD"] = f"studio:{a.secs}"
+        burners = []
+        if a.stress:
+            burn = "import time\nend=time.time()+%d\nwhile time.time()<end: pass\n" % (a.secs + a.after)
+            burners = [subprocess.Popen([sys.executable, "-c", burn]) for _ in range(os.cpu_count() or 2)]
         p, t0 = spawn(a.pkg, r, extra)
         for _ in range(int((a.secs + a.after) * 4)):
             if p.poll() is not None:
@@ -493,9 +502,12 @@ def cmd_glpanic(a):
             time.sleep(0.25)
         alive = p.poll() is None
         kill(p)
+        for b in burners:
+            b.kill()
         log = applog(r)
         (r / "app.log").write_text(log)
-        row = {"cmd": "glpanic", "round": rnd, "alive": alive,
+        row = {"cmd": "glpanic", "tag": a.tag, "stress": a.stress, "round": rnd, "alive": alive,
+               "editor_lines": len(re.findall(r"editor", log, re.I)),
                "lock_panics": log.count("Could not lock adapter context"),
                "panics": len(re.findall(r"panic", log)),
                "editor": bool(re.search(r"editor (window )?opened|open_editor|editor ready", log)),
@@ -823,6 +835,7 @@ def main():
     gp = sub.choices["glpanic"]
     gp.add_argument("--pkg", required=True); gp.add_argument("--rounds", type=int, default=12)
     gp.add_argument("--secs", type=int, default=12); gp.add_argument("--after", type=int, default=25)
+    gp.add_argument("--cap"); gp.add_argument("--stress", action="store_true"); gp.add_argument("--tag", default="")
     pf = sub.choices["perf"]
     pf.add_argument("--arm", required=True); pf.add_argument("--settle", type=int, default=15)
     pf.add_argument("--secs", type=int, default=20)

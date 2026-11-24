@@ -5,7 +5,7 @@ name: Scratch BY lifecycle measurements
 
 on:
   push:
-    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m, ci/by-wprof]
+    branches: [ci/by-measure, ci/by-measure-win, ci/by-welcome-m, ci/by-wprof, ci/by-glpanic]
 
 permissions:
   contents: read
@@ -180,8 +180,9 @@ jobs:
                 Z=$(cat hx-dbg/build-zed.txt); mkdir -p "$Z/crates/gpui_windows/src" && cp hx-dbg/shaders/*.hlsl "$Z/crates/gpui_windows/src/" || true
                 $PY life.py sprof --out out --arm welcome=hx-dbg:welcome --secs 25 --samply "$SAMPLY" ;;
               glpanic)
-                $PY life.py glpanic --out out --pkg ship-head --rounds 12
-                $PY life.py glpanic --out out --pkg ship-head --rounds 8 --secs 30 ;;
+                C="$GITHUB_WORKSPACE/.by/fixture.cap"
+                $PY life.py glpanic --out out --pkg ship-head --rounds 12 --cap "$C" --secs 5 --after 25 --tag cap
+                $PY life.py glpanic --out out --pkg ship-head --rounds 12 --cap "$C" --secs 5 --after 25 --tag capstress --stress ;;
               perf)
                 $PY life.py perf --out out --arm head=ship-head:welcome
                 [ -d ship-fix ] && $PY life.py perf --out out --arm fix=ship-fix:welcome ;;
@@ -213,7 +214,7 @@ jobs:
             ${{ runner.temp }}/by/out/sprof-*
             ${{ runner.temp }}/by/out/runs/sprof-*/logs/*
             ${{ runner.temp }}/by/out/runs/sprof-*/samply.out
-            ${{ runner.temp }}/by/out/runs/gl-*/app.log
+            ${{ runner.temp }}/by/out/runs/gl*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.log
             ${{ runner.temp }}/by/out/runs/*/app.out
             ${{ runner.temp }}/by/out/runs/*/summary.json

@@ -1,1 +1,1 @@
-windows-mid sprof
+linux-mid glpanic
